@@ -1,0 +1,6 @@
+[submodule "third_party/LREngine"]
+	path = third_party/LREngine
+	url = git@github.com:GavinZL/LREngine.git
+[submodule "third_party/TaskQueue"]
+	path = third_party/TaskQueue
+	url = https://github.com/MissYangGoGo/TaskQueue.git
