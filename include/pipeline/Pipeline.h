@@ -27,6 +27,15 @@
 #include "pool/TexturePool.h"
 #include "pool/FramePacketPool.h"
 
+// 平台抽象层
+#include "platform/PlatformContext.h"
+
+// 外观接口（推荐使用）
+#include "PipelineFacade.h"
+
+// 扩展实体
+#include "entity/OutputEntityExt.h"
+
 /**
  * @namespace pipeline
  * @brief 图像处理管线命名空间
@@ -36,37 +45,43 @@
  * - 并行分支和合成
  * - 动态Entity添加/移除
  * - 与AndroidCamera/TaskQueue/LREngine集成
+ * - 多平台兼容（Android GLES / iOS Metal）
+ * - 多输出目标（Display / Encoder / Callback）
  * 
- * 基本使用流程：
+ * 推荐使用 PipelineFacade 进行快速开发：
  * @code
- * // 1. 创建管线管理器
+ * // 使用外观接口（推荐）
+ * PipelineFacadeConfig config;
+ * config.preset = PipelinePreset::CameraPreview;
+ * config.platformConfig.platform = PlatformType::Android;
+ * 
+ * auto pipeline = PipelineFacade::create(config);
+ * pipeline->setupDisplayOutput(surface, 1920, 1080);
+ * pipeline->addBeautyFilter(0.7f, 0.3f);
+ * pipeline->start();
+ * 
+ * // 输入帧数据
+ * pipeline->feedFrame(data, width, height, InputFormat::NV12);
+ * @endcode
+ * 
+ * 高级用户可直接使用 PipelineManager：
+ * @code
+ * // 使用管理器接口（高级）
  * auto pipeline = PipelineManager::create(renderContext);
  * 
- * // 2. 添加Entity
+ * // 添加Entity
  * auto inputId = pipeline->createEntity<InputEntity>("input");
  * auto beautyId = pipeline->createEntity<BeautyEntity>("beauty");
  * auto filterId = pipeline->createEntity<FilterEntity>("filter");
- * auto outputId = pipeline->createEntity<OutputEntity>("output");
+ * auto outputId = pipeline->createEntity<OutputEntityExt>("output");
  * 
- * // 3. 建立连接
+ * // 建立连接
  * pipeline->connect(inputId, beautyId);
  * pipeline->connect(beautyId, filterId);
  * pipeline->connect(filterId, outputId);
  * 
- * // 4. 配置Entity
- * auto beauty = std::dynamic_pointer_cast<BeautyEntity>(pipeline->getEntity(beautyId));
- * beauty->setSmoothLevel(0.7f);
- * beauty->setWhitenLevel(0.3f);
- * 
- * // 5. 启动管线
+ * // 启动管线
  * pipeline->start();
- * 
- * // 6. 处理帧数据
- * pipeline->feedRGBA(data, width, height, stride, timestamp);
- * 
- * // 7. 停止和销毁
- * pipeline->stop();
- * pipeline->destroy();
  * @endcode
  */
 namespace pipeline {
