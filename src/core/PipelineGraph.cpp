@@ -4,6 +4,8 @@
  */
 
 #include "pipeline/core/PipelineGraph.h"
+#include "pipeline/utils/PipelineLog.h"
+
 #include <queue>
 #include <sstream>
 #include <algorithm>
@@ -14,6 +16,7 @@ PipelineGraph::PipelineGraph() = default;
 
 PipelineGraph::~PipelineGraph() {
     clear();
+    PIPELINE_LOGD("PipelineGraph destroyed");
 }
 
 // =============================================================================
@@ -22,6 +25,7 @@ PipelineGraph::~PipelineGraph() {
 
 EntityId PipelineGraph::addEntity(ProcessEntityPtr entity) {
     if (!entity) {
+        PIPELINE_LOGE("Invalid entity");
         return InvalidEntityId;
     }
     
@@ -31,6 +35,7 @@ EntityId PipelineGraph::addEntity(ProcessEntityPtr entity) {
     
     // 检查是否已存在
     if (mEntities.find(id) != mEntities.end()) {
+        PIPELINE_LOGW("Entity with ID %llu already exists", id);
         return id; // 已存在，返回现有ID
     }
     
@@ -41,6 +46,7 @@ EntityId PipelineGraph::addEntity(ProcessEntityPtr entity) {
     invalidateCache();
     ++mVersion;
     
+    PIPELINE_LOGI("Added entity with ID %llu", id);
     return id;
 }
 
@@ -49,6 +55,7 @@ bool PipelineGraph::removeEntity(EntityId entityId) {
     
     auto it = mEntities.find(entityId);
     if (it == mEntities.end()) {
+        PIPELINE_LOGW("Entity with ID %llu does not exist", entityId);
         return false;
     }
     
@@ -80,6 +87,7 @@ bool PipelineGraph::removeEntity(EntityId entityId) {
     invalidateCache();
     ++mVersion;
     
+    PIPELINE_LOGI("Removed entity with ID %llu", entityId);
     return true;
 }
 
@@ -154,6 +162,7 @@ bool PipelineGraph::connect(EntityId srcId, const std::string& srcPort,
     auto dstIt = mEntities.find(dstId);
     
     if (srcIt == mEntities.end() || dstIt == mEntities.end()) {
+        PIPELINE_LOGW("Entity with ID %llu does not exist", srcIt == mEntities.end() ? srcId : dstId);
         return false;
     }
     
@@ -162,6 +171,7 @@ bool PipelineGraph::connect(EntityId srcId, const std::string& srcPort,
     InputPort* inPort = dstIt->second->getInputPort(dstPort);
     
     if (!outPort || !inPort) {
+        PIPELINE_LOGW("Port not found");
         return false;
     }
     
@@ -189,6 +199,9 @@ bool PipelineGraph::connect(EntityId srcId, const std::string& srcPort,
     invalidateCache();
     ++mVersion;
     
+    PIPELINE_LOGI("Connected %s:%s to %s:%s",
+                   srcIt->second->getName().c_str(), srcPort.c_str(),
+                   dstIt->second->getName().c_str(), dstPort.c_str());
     return true;
 }
 
@@ -198,6 +211,7 @@ bool PipelineGraph::connect(EntityId srcId, EntityId dstId) {
     auto dstEntity = getEntity(dstId);
     
     if (!srcEntity || !dstEntity) {
+        PIPELINE_LOGW("Entity with ID %llu does not exist", srcEntity ? dstId : srcId);
         return false;
     }
     
@@ -240,6 +254,7 @@ bool PipelineGraph::disconnect(EntityId srcId, const std::string& srcPort,
         });
     
     if (outIt == outEdges.end()) {
+        PIPELINE_LOGW("Connection not found");
         return false;
     }
     
@@ -271,6 +286,9 @@ bool PipelineGraph::disconnect(EntityId srcId, const std::string& srcPort,
     invalidateCache();
     ++mVersion;
     
+    PIPELINE_LOGI("Disconnected %s:%s from %s:%s",
+                   srcEntity->getName().c_str(), srcPort.c_str(),
+                   dstEntity->getName().c_str(), dstPort.c_str());
     return true;
 }
 
@@ -317,7 +335,7 @@ bool PipelineGraph::disconnectAll(EntityId srcId, EntityId dstId) {
         invalidateCache();
         ++mVersion;
     }
-    
+    PIPELINE_LOGI("Disconnected all entities between %llu and %llu", srcId, dstId);
     return removed;
 }
 
@@ -394,6 +412,7 @@ ValidationResult PipelineGraph::validate() const {
     if (hasCycle()) {
         result.valid = false;
         result.errorMessage = "Graph contains a cycle";
+        PIPELINE_LOGW("Graph contains a cycle");
         return result;
     }
     

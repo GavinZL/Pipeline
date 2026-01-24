@@ -263,6 +263,15 @@ public:
     int32_t setupDisplayOutput(void* surface, int32_t width, int32_t height);
     
     /**
+     * @brief 更新显示输出尺寸
+     * @param targetId 目标ID
+     * @param width 新宽度
+     * @param height 新高度
+     * @return 是否成功
+     */
+    bool updateDisplayOutputSize(int32_t targetId, int32_t width, int32_t height);
+    
+    /**
      * @brief 配置编码器输出
      * @param encoderSurface 编码器Surface
      * @param encoderType 编码器类型

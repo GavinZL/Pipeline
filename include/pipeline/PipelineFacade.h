@@ -306,6 +306,15 @@ public:
      */
     void setOutputTargetEnabled(int32_t targetId, bool enabled);
     
+    /**
+     * @brief 更新显示输出尺寸
+     * @param targetId 目标ID
+     * @param width 新宽度
+     * @param height 新高度
+     * @return 是否成功
+     */
+    bool updateDisplayOutputSize(int32_t targetId, int32_t width, int32_t height);
+    
     // ==========================================================================
     // 滤镜和效果
     // ==========================================================================

@@ -10,11 +10,8 @@
 #import <CoreVideo/CoreVideo.h>
 
 #include "pipeline/platform/PlatformContext.h"
+#include "pipeline/utils/PipelineLog.h"
 #include <iostream>
-
-#define LOGD(fmt, ...) printf("[DEBUG] IOSMetalContextManager: " fmt "\n", ##__VA_ARGS__)
-#define LOGI(fmt, ...) printf("[INFO] IOSMetalContextManager: " fmt "\n", ##__VA_ARGS__)
-#define LOGE(fmt, ...) fprintf(stderr, "[ERROR] IOSMetalContextManager: " fmt "\n", ##__VA_ARGS__)
 
 namespace pipeline {
 
@@ -37,24 +34,24 @@ bool IOSMetalContextManager::initialize(const Config& config) {
     std::lock_guard<std::mutex> lock(mMutex);
     
     if (mInitialized) {
-        LOGD("Already initialized");
+        PIPELINE_LOGW("Already initialized");
         return true;
     }
     
-    LOGI("Initializing IOSMetalContextManager");
+    PIPELINE_LOGI("Initializing IOSMetalContextManager");
     
     // 1. 获取或创建 Metal 设备
     if (config.metalDevice != nullptr) {
         mMetalDevice = config.metalDevice;
-        LOGD("Using provided Metal device: %p", mMetalDevice);
+        PIPELINE_LOGD("Using provided Metal device: %p", mMetalDevice);
     } else {
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         if (!device) {
-            LOGE("Failed to create Metal device");
+            PIPELINE_LOGE("Failed to create Metal device");
             return false;
         }
         mMetalDevice = (__bridge void*)device;
-        LOGI("Created system default Metal device: %s", [device.name UTF8String]);
+        PIPELINE_LOGI("Created system default Metal device: %s", [device.name UTF8String]);
     }
     
     // 2. 创建 CVMetalTextureCache
@@ -68,15 +65,15 @@ bool IOSMetalContextManager::initialize(const Config& config) {
         );
         
         if (status != kCVReturnSuccess) {
-            LOGE("CVMetalTextureCacheCreate failed with status: %d", status);
+            PIPELINE_LOGE("CVMetalTextureCacheCreate failed with status: %d", status);
             return false;
         }
         
-        LOGI("Created CVMetalTextureCache with max size: %d", config.textureCacheMaxSize);
+        PIPELINE_LOGI("Created CVMetalTextureCache with max size: %d", config.textureCacheMaxSize);
     }
     
     mInitialized = true;
-    LOGI("IOSMetalContextManager initialized successfully");
+    PIPELINE_LOGI("IOSMetalContextManager initialized successfully");
     
     return true;
 }
@@ -86,12 +83,12 @@ std::shared_ptr<lrengine::render::LRTexture> IOSMetalContextManager::createTextu
     lrengine::render::LRRenderContext* renderContext) {
     
     if (!mInitialized || !mTextureCache) {
-        LOGE("Not initialized or texture cache not available");
+        PIPELINE_LOGE("Not initialized or texture cache not available");
         return nullptr;
     }
     
     if (!pixelBuffer) {
-        LOGE("Invalid pixelBuffer");
+        PIPELINE_LOGE("Invalid pixelBuffer");
         return nullptr;
     }
     
@@ -102,7 +99,7 @@ std::shared_ptr<lrengine::render::LRTexture> IOSMetalContextManager::createTextu
     size_t height = CVPixelBufferGetHeight(pixelBuffer);
     OSType pixelFormat = CVPixelBufferGetPixelFormatType(pixelBuffer);
     
-    LOGD("Creating texture from CVPixelBuffer: %zux%zu, format: 0x%x", width, height, pixelFormat);
+    PIPELINE_LOGD("Creating texture from CVPixelBuffer: %zux%zu, format: 0x%x", width, height, pixelFormat);
     
     // 确定 Metal 像素格式
     MTLPixelFormat metalFormat;
@@ -117,10 +114,10 @@ std::shared_ptr<lrengine::render::LRTexture> IOSMetalContextManager::createTextu
         case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange:
             // NV12 格式 - 只处理 Y 平面
             metalFormat = MTLPixelFormatR8Unorm;
-            LOGD("NV12 format detected, using Y plane only");
+            PIPELINE_LOGD("NV12 format detected, using Y plane only");
             break;
         default:
-            LOGE("Unsupported pixel format: 0x%x", pixelFormat);
+            PIPELINE_LOGE("Unsupported pixel format: 0x%x", pixelFormat);
             return nullptr;
     }
     
@@ -139,19 +136,19 @@ std::shared_ptr<lrengine::render::LRTexture> IOSMetalContextManager::createTextu
     );
     
     if (status != kCVReturnSuccess) {
-        LOGE("CVMetalTextureCacheCreateTextureFromImage failed: %d", status);
+        PIPELINE_LOGE("CVMetalTextureCacheCreateTextureFromImage failed: %d", status);
         return nullptr;
     }
     
     // 获取 Metal 纹理
     id<MTLTexture> metalTexture = CVMetalTextureGetTexture(cvMetalTexture);
     if (!metalTexture) {
-        LOGE("Failed to get Metal texture from CVMetalTexture");
+        PIPELINE_LOGE("Failed to get Metal texture from CVMetalTexture");
         CFRelease(cvMetalTexture);
         return nullptr;
     }
     
-    LOGI("Created Metal texture: %zux%zu, format: %lu", 
+    PIPELINE_LOGI("Created Metal texture: %zux%zu, format: %lu", 
          metalTexture.width, metalTexture.height, (unsigned long)metalTexture.pixelFormat);
     
     // TODO: 封装为 LRTexture
@@ -160,7 +157,7 @@ std::shared_ptr<lrengine::render::LRTexture> IOSMetalContextManager::createTextu
     
     CFRelease(cvMetalTexture);
     
-    LOGD("Note: LRTexture wrapping not yet implemented, returning nullptr");
+    PIPELINE_LOGD("Note: LRTexture wrapping not yet implemented, returning nullptr");
     return nullptr;
 }
 
@@ -169,12 +166,12 @@ bool IOSMetalContextManager::copyTextureToPixelBuffer(
     CVPixelBufferRef pixelBuffer) {
     
     if (!mInitialized) {
-        LOGE("Not initialized");
+        PIPELINE_LOGE("Not initialized");
         return false;
     }
     
     if (!texture || !pixelBuffer) {
-        LOGE("Invalid texture or pixelBuffer");
+        PIPELINE_LOGE("Invalid texture or pixelBuffer");
         return false;
     }
     
@@ -184,7 +181,7 @@ bool IOSMetalContextManager::copyTextureToPixelBuffer(
     // 2. 使用 Metal Blit 命令编码器或 Metal Performance Shaders
     // 3. 将纹理内容拷贝到 CVPixelBuffer
     
-    LOGD("copyTextureToPixelBuffer not yet fully implemented");
+    PIPELINE_LOGD("copyTextureToPixelBuffer not yet fully implemented");
     
     return false;
 }
@@ -196,7 +193,7 @@ void IOSMetalContextManager::flushTextureCache() {
     
     std::lock_guard<std::mutex> lock(mMutex);
     CVMetalTextureCacheFlush(static_cast<CVMetalTextureCacheRef>(mTextureCache), 0);
-    LOGD("Flushed texture cache");
+    PIPELINE_LOGD("Flushed texture cache");
 }
 
 void IOSMetalContextManager::destroy() {
@@ -206,7 +203,7 @@ void IOSMetalContextManager::destroy() {
         return;
     }
     
-    LOGI("Destroying IOSMetalContextManager");
+    PIPELINE_LOGI("Destroying IOSMetalContextManager");
     
     // 释放纹理缓存
     if (mTextureCache) {
@@ -218,7 +215,7 @@ void IOSMetalContextManager::destroy() {
     mMetalDevice = nullptr;
     
     mInitialized = false;
-    LOGI("IOSMetalContextManager destroyed");
+    PIPELINE_LOGI("IOSMetalContextManager destroyed");
 }
 
 } // namespace pipeline

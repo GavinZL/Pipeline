@@ -8,6 +8,8 @@
 #include "pipeline/entity/ProcessEntity.h"
 #include "pipeline/pool/TexturePool.h"
 #include "pipeline/pool/FramePacketPool.h"
+#include "pipeline/utils/PipelineLog.h"
+
 
 // TaskQueue头文件
 #include "TaskQueue.h"
@@ -23,10 +25,12 @@ PipelineExecutor::PipelineExecutor(PipelineGraph* graph, const ExecutorConfig& c
     : mConfig(config)
     , mGraph(graph)
 {
+    PIPELINE_LOGI("Creating PipelineExecutor");
 }
 
 PipelineExecutor::~PipelineExecutor() {
     shutdown();
+    PIPELINE_LOGI("Destroying PipelineExecutor");
 }
 
 // =============================================================================
@@ -35,15 +39,18 @@ PipelineExecutor::~PipelineExecutor() {
 
 bool PipelineExecutor::initialize() {
     if (mInitialized.load()) {
+        PIPELINE_LOGW("PipelineExecutor already initialized");
         return true;
     }
     
     if (!mGraph) {
+        PIPELINE_LOGE("PipelineExecutor graph is null");
         return false;
     }
     
     // 创建任务队列
     if (!createTaskQueues()) {
+        PIPELINE_LOGE("Failed to create task queues");
         return false;
     }
     
@@ -63,11 +70,12 @@ bool PipelineExecutor::initialize() {
     
     mInitialized.store(true);
     mRunning.store(true);
-    
+    PIPELINE_LOGI("PipelineExecutor initialized");
     return true;
 }
 
 void PipelineExecutor::shutdown() {
+    PIPELINE_LOGI("Shutting down PipelineExecutor");
     mRunning.store(false);
     
     // 等待所有任务完成
@@ -79,6 +87,7 @@ void PipelineExecutor::shutdown() {
     mIOQueue.reset();
     
     mInitialized.store(false);
+    PIPELINE_LOGI("PipelineExecutor shut down");
 }
 
 // =============================================================================
@@ -105,6 +114,7 @@ void PipelineExecutor::setFramePacketPool(std::shared_ptr<FramePacketPool> pool)
 
 bool PipelineExecutor::processFrame(FramePacketPtr input) {
     if (!mRunning.load() || !input) {
+        PIPELINE_LOGW("PipelineExecutor is not running or input is null");
         return false;
     }
     
@@ -114,12 +124,14 @@ bool PipelineExecutor::processFrame(FramePacketPtr input) {
             mFrameDroppedCallback(input);
         }
         mStats.droppedFrames++;
+        PIPELINE_LOGW("Dropped frame %llu", input->getFrameId());
         return false;
     }
     
     // 检查图是否有变化
     if (mGraph->getVersion() != mLastGraphVersion) {
         updateExecutionPlan();
+        PIPELINE_LOGI("Graph changed, updated execution plan");
     }
     
     mPendingFrames.fetch_add(1);
@@ -186,6 +198,7 @@ bool PipelineExecutor::processFrame(FramePacketPtr input) {
 bool PipelineExecutor::processFrameAsync(FramePacketPtr input,
                                          std::function<void(FramePacketPtr)> callback) {
     if (!mRunning.load() || !input) {
+        PIPELINE_LOGW("PipelineExecutor is not running or input is null");
         return false;
     }
     
@@ -195,6 +208,7 @@ bool PipelineExecutor::processFrameAsync(FramePacketPtr input,
             mFrameDroppedCallback(input);
         }
         mStats.droppedFrames++;
+        PIPELINE_LOGW("Dropped frame %llu", input->getFrameId());
         return false;
     }
     
@@ -234,6 +248,7 @@ void PipelineExecutor::cancelAll() {
     for (auto& entity : entities) {
         entity->cancel();
     }
+    PIPELINE_LOGI("Cancelled all entities");
 }
 
 // =============================================================================
@@ -312,6 +327,7 @@ void PipelineExecutor::updateExecutionPlan() {
 void PipelineExecutor::executeEntity(EntityId entityId, FramePacketPtr frameContext) {
     auto entity = mGraph->getEntity(entityId);
     if (!entity) {
+        PIPELINE_LOGW("Entity %llu not found", entityId);
         return;
     }
     

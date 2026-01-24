@@ -8,6 +8,8 @@ endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# 编辑器跳转
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ============================================
 # 选项
@@ -59,6 +61,9 @@ set(PIPELINE_CORE_SOURCES
     # 资源池
     src/pool/FramePacketPool.cpp
     src/pool/TexturePool.cpp
+    
+    # 工具库
+    src/utils/PipelineLog.cpp
 )
 
 # ============================================

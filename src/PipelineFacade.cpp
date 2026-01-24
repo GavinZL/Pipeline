@@ -7,7 +7,7 @@
 
 #include "pipeline/PipelineFacade.h"
 #include "pipeline/entity/IOEntity.h"
-
+#include "pipeline/utils/PipelineLog.h"
 #include <algorithm>
 #include <vector>
 
@@ -69,6 +69,7 @@ bool PipelineFacade::initialize() {
     {
         std::lock_guard<std::mutex> lock(mStateMutex);
         if (mInitialized) {
+            PIPELINE_LOGW("PipelineFacade already initialized");
             return true;
         }
     }
@@ -78,6 +79,7 @@ bool PipelineFacade::initialize() {
         if (mCallbacks.onError) {
             mCallbacks.onError("Failed to initialize PlatformContext");
         }
+        PIPELINE_LOGE("Failed to initialize PlatformContext");
         return false;
     }
 
@@ -86,16 +88,19 @@ bool PipelineFacade::initialize() {
         mInitialized = true;
     }
 
+    PIPELINE_LOGI("PipelineFacade initialized");
     return true;
 }
 
 bool PipelineFacade::start() {
     if (!initialize()) {
+        PIPELINE_LOGE("Failed to initialize PipelineFacade");
         return false;
     }
 
     if (!mPipelineManager) {
         // 需要先通过输出配置接口创建实际管线（例如 setupDisplayOutput）
+        PIPELINE_LOGE("PipelineManager not created, cannot start pipeline, need to call setupDisplayOutput first");
         return false;
     }
 
@@ -103,9 +108,11 @@ bool PipelineFacade::start() {
         if (mCallbacks.onError) {
             mCallbacks.onError("Failed to start pipeline");
         }
+        PIPELINE_LOGE("Failed to start pipeline");
         return false;
     }
 
+    PIPELINE_LOGI("PipelineFacade started");
     if (mOutputEntity) {
         mOutputEntity->start();
     }
@@ -120,6 +127,7 @@ void PipelineFacade::pause() {
     if (mOutputEntity) {
         mOutputEntity->pause();
     }
+    PIPELINE_LOGI("PipelineFacade paused");
 }
 
 void PipelineFacade::resume() {
@@ -129,6 +137,7 @@ void PipelineFacade::resume() {
     if (mOutputEntity) {
         mOutputEntity->resume();
     }
+    PIPELINE_LOGI("PipelineFacade resumed");
 }
 
 void PipelineFacade::stop() {
@@ -138,6 +147,7 @@ void PipelineFacade::stop() {
     if (mOutputEntity) {
         mOutputEntity->stop();
     }
+    PIPELINE_LOGI("PipelineFacade stopped");
 }
 
 void PipelineFacade::destroy() {
@@ -165,6 +175,7 @@ void PipelineFacade::destroy() {
         mInitialized = false;
         mCurrentFPS = 0.0;
     }
+    PIPELINE_LOGI("PipelineFacade destroyed");
 }
 
 PipelineState PipelineFacade::getState() const {
@@ -331,10 +342,12 @@ bool PipelineFacade::feedPixelBuffer(void* pixelBuffer, uint64_t timestamp) {
 
 int32_t PipelineFacade::setupDisplayOutput(void* surface, int32_t width, int32_t height) {
     if (!surface) {
+        PIPELINE_LOGE("Invalid surface");
         return -1;
     }
 
     if (!initialize()) {
+        PIPELINE_LOGE("Failed to initialize PipelineFacade");
         return -1;
     }
 
@@ -349,8 +362,10 @@ int32_t PipelineFacade::setupDisplayOutput(void* surface, int32_t width, int32_t
             if (mCallbacks.onError) {
                 mCallbacks.onError("Failed to create render context for display output");
             }
+            PIPELINE_LOGE("Failed to create render context for display output");
             return -1;
         }
+        PIPELINE_LOGI("Render context created for display output");
     }
 
     // 创建 PipelineManager 与预设管线
@@ -369,6 +384,7 @@ int32_t PipelineFacade::setupDisplayOutput(void* surface, int32_t width, int32_t
                 mCallbacks.onError("Failed to initialize PipelineManager");
             }
             mPipelineManager.reset();
+            PIPELINE_LOGE("Failed to initialize PipelineManager");
             return -1;
         }
 
@@ -376,6 +392,7 @@ int32_t PipelineFacade::setupDisplayOutput(void* surface, int32_t width, int32_t
             if (mCallbacks.onError) {
                 mCallbacks.onError("Failed to create preset pipeline");
             }
+            PIPELINE_LOGE("Failed to create preset pipeline");
             return -1;
         }
 
@@ -413,6 +430,7 @@ int32_t PipelineFacade::setupDisplayOutput(void* surface, int32_t width, int32_t
     }
 
     if (!mOutputEntity) {
+        PIPELINE_LOGE("Failed to create output entity");
         return -1;
     }
 
@@ -452,6 +470,13 @@ void PipelineFacade::setOutputTargetEnabled(int32_t targetId, bool enabled) {
         return;
     }
     mOutputEntity->setOutputTargetEnabled(targetId, enabled);
+}
+
+bool PipelineFacade::updateDisplayOutputSize(int32_t targetId, int32_t width, int32_t height) {
+    if (!mOutputEntity) {
+        return false;
+    }
+    return mOutputEntity->updateDisplayOutputSize(targetId, width, height);
 }
 
 // 滤镜占位
@@ -551,6 +576,7 @@ bool PipelineFacade::loadConfig(const std::string& filePath) {
 
 bool PipelineFacade::createPresetPipeline(PipelinePreset preset) {
     if (!mPipelineManager) {
+        PIPELINE_LOGE("PipelineManager is not initialized");
         return false;
     }
 
@@ -587,6 +613,7 @@ bool PipelineFacade::createPresetPipeline(PipelinePreset preset) {
     mPipelineManager->setInputEntity(inputId);
     mPipelineManager->setOutputEntity(outputId);
 
+    PIPELINE_LOGI("Preset pipeline created");
     return inputEntity != nullptr && mOutputEntity != nullptr;
 }
 
@@ -598,6 +625,7 @@ bool PipelineFacade::initializePlatformContext() {
 
     PlatformContextConfig cfg = mConfig.platformConfig;
 
+    // 设置默认平台和图形API
 #if defined(__ANDROID__)
     if (cfg.platform == PlatformType::Unknown) {
         cfg.platform = PlatformType::Android;
@@ -612,6 +640,7 @@ bool PipelineFacade::initializePlatformContext() {
     }
 #endif
 
+    // 具体平台初始化
     return mPlatformContext->initialize(cfg);
 #else
     (void)this;

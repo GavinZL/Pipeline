@@ -7,6 +7,8 @@
 #include "pipeline/entity/IOEntity.h"
 #include "pipeline/pool/TexturePool.h"
 #include "pipeline/pool/FramePacketPool.h"
+#include "pipeline/utils/PipelineLog.h"
+
 
 namespace pipeline {
 
@@ -21,6 +23,7 @@ std::shared_ptr<PipelineManager> PipelineManager::create(
     auto manager = std::shared_ptr<PipelineManager>(
         new PipelineManager(renderContext, config));
     
+    PIPELINE_LOGI("Creating PipelineManager");
     return manager;
 }
 
@@ -36,6 +39,8 @@ PipelineManager::PipelineManager(lrengine::render::LRRenderContext* renderContex
     mContext = std::make_shared<PipelineContext>();
     mContext->setRenderContext(renderContext);
     mContext->setConfig(config);
+
+    PIPELINE_LOGI("Creating PipelineManager with config");
 }
 
 PipelineManager::~PipelineManager() {
@@ -48,17 +53,20 @@ PipelineManager::~PipelineManager() {
 
 bool PipelineManager::initialize() {
     if (mState != PipelineState::Created) {
+        PIPELINE_LOGE("PipelineManager is not in Created state");
         return false;
     }
     
     // 创建资源池
     if (!createResourcePools()) {
+        PIPELINE_LOGE("Failed to create resource pools");
         setState(PipelineState::Error);
         return false;
     }
     
     // 初始化GPU资源
     if (!initializeGPUResources()) {
+        PIPELINE_LOGE("Failed to initialize GPU resources");
         setState(PipelineState::Error);
         return false;
     }
@@ -74,6 +82,7 @@ bool PipelineManager::initialize() {
     mExecutor->setFramePacketPool(mFramePacketPool);
     
     if (!mExecutor->initialize()) {
+        PIPELINE_LOGE("Failed to initialize executor");
         setState(PipelineState::Error);
         return false;
     }
@@ -84,12 +93,14 @@ bool PipelineManager::initialize() {
     mExecutor->setErrorCallback(mErrorCallback);
     
     setState(PipelineState::Initialized);
+    PIPELINE_LOGI("PipelineManager initialized");
     return true;
 }
 
 bool PipelineManager::start() {
     // 幂等设计：如果已经在运行，直接返回成功
     if (mState == PipelineState::Running) {
+        PIPELINE_LOGW("PipelineManager already running");
         return true;
     }
     

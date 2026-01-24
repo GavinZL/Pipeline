@@ -7,6 +7,7 @@
 
 #include "pipeline/entity/OutputEntityExt.h"
 #include "pipeline/data/FramePacket.h"
+#include "pipeline/utils/PipelineLog.h"
 
 // LREngine headers
 #include <lrengine/core/LRRenderContext.h>
@@ -65,10 +66,12 @@ OutputEntityExt::OutputEntityExt(const std::string& name)
     , mIsRunning(false)
     , mIsPaused(false)
 {
+    PIPELINE_LOGI("OutputEntityExt created");
 }
 
 OutputEntityExt::~OutputEntityExt() {
     stop();
+    PIPELINE_LOGI("OutputEntityExt destroyed");
 }
 
 void OutputEntityExt::setRenderContext(lrengine::render::LRRenderContext* context) {
@@ -147,7 +150,35 @@ int32_t OutputEntityExt::setupDisplayOutput(void* surface, int32_t width, int32_
     config.displayConfig.width = width;
     config.displayConfig.height = height;
     
+    PIPELINE_LOGI("Setting up display output with surface %p, width %d, height %d", surface, width, height);
     return addOutputTarget(config);
+}
+
+bool OutputEntityExt::updateDisplayOutputSize(int32_t targetId, int32_t width, int32_t height) {
+    if (width <= 0 || height <= 0) {
+        PIPELINE_LOGW("Invalid display output size: %dx%d", width, height);
+        return false;
+    }
+    
+    std::lock_guard<std::mutex> lock(mTargetsMutex);
+    
+    auto it = mOutputTargets.find(targetId);
+    if (it == mOutputTargets.end()) {
+        PIPELINE_LOGW("Output target %d not found", targetId);
+        return false;
+    }
+    
+    if (it->second.targetType != OutputTargetType::Display) {
+        PIPELINE_LOGW("Output target %d is not a display target", targetId);
+        return false;
+    }
+    
+    // 更新尺寸
+    it->second.displayConfig.width = width;
+    it->second.displayConfig.height = height;
+    
+    PIPELINE_LOGI("Updated display output %d size to %dx%d", targetId, width, height);
+    return true;
 }
 
 int32_t OutputEntityExt::setupEncoderOutput(void* encoderSurface, EncoderType encoderType) {
@@ -156,6 +187,7 @@ int32_t OutputEntityExt::setupEncoderOutput(void* encoderSurface, EncoderType en
     config.encoderConfig.encoderSurface = encoderSurface;
     config.encoderConfig.encoderType = encoderType;
     
+    PIPELINE_LOGI("Setting up encoder output with encoder surface %p, type %d", encoderSurface, encoderType);
     return addOutputTarget(config);
 }
 
@@ -165,6 +197,7 @@ int32_t OutputEntityExt::setupCallbackOutput(FrameCallback callback, OutputDataF
     config.callbackConfig.frameCallback = callback;
     config.callbackConfig.dataFormat = dataFormat;
     
+    PIPELINE_LOGI("Setting up callback output, data format %d", static_cast<int>(dataFormat));
     return addOutputTarget(config);
 }
 
@@ -173,6 +206,7 @@ int32_t OutputEntityExt::setupTextureOutput(bool shareTexture) {
     config.targetType = OutputTargetType::Texture;
     config.textureConfig.shareTexture = shareTexture;
     
+    PIPELINE_LOGI("Setting up texture output with share texture %d", shareTexture);
     return addOutputTarget(config);
 }
 
@@ -182,6 +216,7 @@ int32_t OutputEntityExt::setupFileOutput(const std::string& filePath, const std:
     config.fileConfig.filePath = filePath;
     config.fileConfig.fileFormat = fileFormat;
     
+    PIPELINE_LOGI("Setting up file output with file path %s, format %s", filePath.c_str(), fileFormat.c_str());
     return addOutputTarget(config);
 }
 
