@@ -14,6 +14,28 @@
 #include <memory>
 #include <mutex>
 
+// =============================================================================
+// 平台头文件（必须在 namespace 之前 include）
+// =============================================================================
+
+#ifdef __ANDROID__
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES3/gl3.h>
+#endif // __ANDROID__
+
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#include <CoreVideo/CoreVideo.h>
+#include <CoreVideo/CVMetalTexture.h>
+
+#if TARGET_OS_IPHONE || TARGET_OS_IOS
+    #define PIPELINE_PLATFORM_IOS 1
+#elif TARGET_OS_MAC
+    #define PIPELINE_PLATFORM_MACOS 1
+#endif
+#endif // __APPLE__
+
 // 前向声明
 namespace lrengine {
 namespace render {
@@ -55,10 +77,6 @@ enum class GraphicsAPI : uint8_t {
 // =============================================================================
 
 #ifdef __ANDROID__
-
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-#include <GLES3/gl3.h>
 
 /**
  * @brief Android EGL上下文管理器
@@ -155,19 +173,6 @@ private:
 // =============================================================================
 
 #if defined(__APPLE__)
-
-#include <TargetConditionals.h>
-#include <CoreVideo/CoreVideo.h>
-#include <CoreVideo/CVMetalTexture.h>
-
-#if TARGET_OS_IPHONE || TARGET_OS_IOS
-    // iOS平台
-    #define PIPELINE_PLATFORM_IOS 1
-#elif TARGET_OS_MAC
-    // macOS平台
-    #define PIPELINE_PLATFORM_MACOS 1
-#endif
-
 
 /**
  * @brief iOS Metal上下文管理器

@@ -137,10 +137,10 @@ else()
     message(WARNING "lrengine target not found")
 endif()
 
-# 链接 TaskQueue
-if(TARGET TaskQueue)
-    target_link_libraries(Pipeline PUBLIC TaskQueue)
-    message(STATUS "Pipeline linked with TaskQueue")
+# 链接 TaskQueue (dispatch_queue)
+if(TARGET dispatch_queue)
+    target_link_libraries(Pipeline PUBLIC dispatch_queue)
+    message(STATUS "Pipeline linked with dispatch_queue (TaskQueue)")
 else()
     # 尝试手动包含TaskQueue头文件
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/TaskQueue/TaskQueue")
@@ -149,7 +149,7 @@ else()
         )
         message(STATUS "TaskQueue headers included manually")
     else()
-        message(WARNING "TaskQueue target and headers not found")
+        message(WARNING "dispatch_queue target and TaskQueue headers not found")
     endif()
 endif()
 
