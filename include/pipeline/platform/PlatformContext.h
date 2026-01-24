@@ -157,27 +157,17 @@ private:
 #if defined(__APPLE__)
 
 #include <TargetConditionals.h>
+#include <CoreVideo/CoreVideo.h>
+#include <CoreVideo/CVMetalTexture.h>
 
 #if TARGET_OS_IPHONE || TARGET_OS_IOS
     // iOS平台
     #define PIPELINE_PLATFORM_IOS 1
-    
-    // 前向声明（避免引入Objective-C++头文件）
-    typedef struct __CVBuffer* CVPixelBufferRef;
-    typedef struct __CVMetalTextureCache* CVMetalTextureCacheRef;
-    
 #elif TARGET_OS_MAC
     // macOS平台
     #define PIPELINE_PLATFORM_MACOS 1
 #endif
 
-#ifdef __OBJC__
-    @class MTLDevice;
-    @class MTLTexture;
-#else
-    typedef void MTLDevice;
-    typedef void MTLTexture;
-#endif
 
 /**
  * @brief iOS Metal上下文管理器
@@ -234,7 +224,7 @@ public:
     /**
      * @brief 获取纹理缓存
      */
-    CVMetalTextureCacheRef getTextureCache() const { return mTextureCache; }
+    void* getTextureCache() const { return mTextureCache; }
     
     /**
      * @brief 刷新纹理缓存
@@ -248,7 +238,7 @@ public:
     
 private:
     void* mMetalDevice = nullptr;                    // MTLDevice*
-    CVMetalTextureCacheRef mTextureCache = nullptr;
+    void* mTextureCache = nullptr;
     
     bool mInitialized = false;
     std::mutex mMutex;

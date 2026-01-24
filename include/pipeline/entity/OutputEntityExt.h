@@ -15,6 +15,8 @@
 #include "IOEntity.h"
 #include <vector>
 #include <functional>
+#include <string>
+#include <unordered_map>
 
 // 前向声明
 namespace lrengine {

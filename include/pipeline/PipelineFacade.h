@@ -524,7 +524,7 @@ private:
     
     // 状态
     bool mInitialized = false;
-    std::mutex mStateMutex;
+    mutable std::mutex mStateMutex;
     
     // 性能统计
     std::chrono::steady_clock::time_point mLastFrameTime;

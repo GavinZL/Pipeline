@@ -64,7 +64,7 @@ bool IOSMetalContextManager::initialize(const Config& config) {
             nullptr,
             (__bridge id<MTLDevice>)mMetalDevice,
             nullptr,
-            &mTextureCache
+            reinterpret_cast<CVMetalTextureCacheRef*>(&mTextureCache)
         );
         
         if (status != kCVReturnSuccess) {
@@ -128,7 +128,7 @@ std::shared_ptr<lrengine::render::LRTexture> IOSMetalContextManager::createTextu
     CVMetalTextureRef cvMetalTexture = nullptr;
     CVReturn status = CVMetalTextureCacheCreateTextureFromImage(
         kCFAllocatorDefault,
-        mTextureCache,
+        static_cast<CVMetalTextureCacheRef>(mTextureCache),
         pixelBuffer,
         nullptr,
         metalFormat,
@@ -195,7 +195,7 @@ void IOSMetalContextManager::flushTextureCache() {
     }
     
     std::lock_guard<std::mutex> lock(mMutex);
-    CVMetalTextureCacheFlush(mTextureCache, 0);
+    CVMetalTextureCacheFlush(static_cast<CVMetalTextureCacheRef>(mTextureCache), 0);
     LOGD("Flushed texture cache");
 }
 
@@ -210,7 +210,7 @@ void IOSMetalContextManager::destroy() {
     
     // 释放纹理缓存
     if (mTextureCache) {
-        CFRelease(mTextureCache);
+        CFRelease(static_cast<CVMetalTextureCacheRef>(mTextureCache));
         mTextureCache = nullptr;
     }
     
