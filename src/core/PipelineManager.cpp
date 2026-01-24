@@ -88,6 +88,11 @@ bool PipelineManager::initialize() {
 }
 
 bool PipelineManager::start() {
+    // 幂等设计：如果已经在运行，直接返回成功
+    if (mState == PipelineState::Running) {
+        return true;
+    }
+    
     if (mState != PipelineState::Initialized && mState != PipelineState::Stopped) {
         // 尝试初始化
         if (mState == PipelineState::Created) {
