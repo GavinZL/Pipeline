@@ -347,7 +347,7 @@ public:
     // iOS特定接口
     // =========================================================================
     
-#if defined(PIPELINE_PLATFORM_IOS)
+#if defined(PIPELINE_PLATFORM_IOS) || defined(PIPELINE_PLATFORM_MACOS)
     /**
      * @brief 获取iOS Metal管理器
      */
@@ -382,7 +382,7 @@ private:
     std::unique_ptr<AndroidEGLContextManager> mAndroidEGLManager;
 #endif
     
-#if defined(PIPELINE_PLATFORM_IOS)
+#if defined(PIPELINE_PLATFORM_IOS) || defined(PIPELINE_PLATFORM_MACOS)
     std::unique_ptr<IOSMetalContextManager> mIOSMetalManager;
 #endif
 };

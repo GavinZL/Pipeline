@@ -4,3 +4,6 @@
 [submodule "third_party/TaskQueue"]
 	path = third_party/TaskQueue
 	url = https://github.com/MissYangGoGo/TaskQueue.git
+[submodule "third_party/libyuv"]
+	path = third_party/libyuv
+	url = git@github.com:GavinZL/libyuv.git

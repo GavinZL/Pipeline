@@ -37,6 +37,15 @@ else()
     message(WARNING "TaskQueue submodule not found, please run: git submodule update --init")
 endif()
 
+# libyuv submodule (用于 YUV/RGB 格式转换)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libyuv/CMakeLists.txt")
+    message(STATUS "Found libyuv submodule")
+    set(LIBYUV_BUILD_TESTS OFF CACHE BOOL "Build libyuv tests" FORCE)
+    add_subdirectory(third_party/libyuv)
+else()
+    message(WARNING "libyuv submodule not found, please run: git submodule update --init")
+endif()
+
 # ============================================
 # 核心源文件
 # ============================================
@@ -88,7 +97,30 @@ endif()
 # ============================================
 set(PIPELINE_EXTENDED_SOURCES
     src/entity/OutputEntityExt.cpp
+    src/entity/MergeEntity.cpp
 )
+
+# ============================================
+# Input/Output 模块源文件
+# ============================================
+set(PIPELINE_IO_SOURCES
+    src/input/InputEntity.cpp
+    src/input/FrameSynchronizer.cpp
+    src/output/OutputEntity.cpp
+)
+
+# 平台适配层源文件
+if(ANDROID)
+    list(APPEND PIPELINE_IO_SOURCES
+        src/input/android/OESTextureInputStrategy.cpp
+        src/output/android/AndroidEGLSurface.cpp
+    )
+elseif(IOS OR APPLE)
+    list(APPEND PIPELINE_IO_SOURCES
+        src/input/ios/PixelBufferInputStrategy.mm
+        src/output/ios/iOSMetalSurface.mm
+    )
+endif()
 
 # ============================================
 # 外观接口源文件
@@ -113,6 +145,7 @@ set(PIPELINE_SOURCES
     ${PIPELINE_CORE_SOURCES}
     ${PIPELINE_PLATFORM_SOURCES}
     ${PIPELINE_EXTENDED_SOURCES}
+    ${PIPELINE_IO_SOURCES}
     ${PIPELINE_FACADE_SOURCES}
     ${PIPELINE_ENTITY_SOURCES}
 )
@@ -156,6 +189,17 @@ else()
     else()
         message(WARNING "dispatch_queue target and TaskQueue headers not found")
     endif()
+endif()
+
+# 链接 libyuv (YUV/RGB 格式转换)
+if(TARGET yuv)
+    target_link_libraries(Pipeline PUBLIC yuv)
+    target_include_directories(Pipeline PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libyuv/include
+    )
+    message(STATUS "Pipeline linked with libyuv")
+else()
+    message(WARNING "libyuv target not found")
 endif()
 
 # ============================================

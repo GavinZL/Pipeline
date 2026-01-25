@@ -2,20 +2,34 @@
  * @file PipelineFacade.cpp
  * @brief Pipeline外观接口实现
  * 
- * TODO: 完整实现 - Phase 3
+ * 使用新的双路 I/O 模块：
+ * - InputEntity: 支持双路分发（GPU + CPU）
+ * - OutputEntity: 支持多目标输出
+ * - DisplaySurface: 平台特定显示表面
  */
 
 #include "pipeline/PipelineFacade.h"
-#include "pipeline/entity/IOEntity.h"
 #include "pipeline/utils/PipelineLog.h"
 #include <algorithm>
 #include <vector>
+
+// 新的 I/O 模块
+#include "pipeline/input/InputEntity.h"
+#include "pipeline/output/OutputEntity.h"
+#include "pipeline/output/DisplaySurface.h"
 
 #include <lrengine/core/LRRenderContext.h>
 #include <lrengine/core/LRTypes.h>
 
 #if defined(__APPLE__)
 #include <CoreVideo/CoreVideo.h>
+#include "pipeline/input/ios/PixelBufferInputStrategy.h"
+#include "pipeline/output/ios/iOSMetalSurface.h"
+#endif
+
+#if defined(__ANDROID__)
+#include "pipeline/input/android/OESTextureInputStrategy.h"
+#include "pipeline/output/android/AndroidEGLSurface.h"
 #endif
 
 namespace pipeline {
@@ -45,13 +59,9 @@ lrengine::render::LRRenderContext* createRenderContextForSurface(
 
 } // anonymous namespace
 
-// 占位实现，Phase 3 会完整实现
 PipelineFacade::PipelineFacade(const PipelineFacadeConfig& config)
     : mConfig(config)
     , mRenderContext(nullptr)
-    , mInputEntityId(InvalidEntityId)
-    , mOutputEntityId(InvalidEntityId)
-    , mOutputEntity(nullptr)
     , mInitialized(false)
     , mCurrentFPS(0.0)
 {
@@ -113,10 +123,6 @@ bool PipelineFacade::start() {
     }
 
     PIPELINE_LOGI("PipelineFacade started");
-    if (mOutputEntity) {
-        mOutputEntity->start();
-    }
-
     return true;
 }
 
@@ -124,8 +130,8 @@ void PipelineFacade::pause() {
     if (mPipelineManager) {
         mPipelineManager->pause();
     }
-    if (mOutputEntity) {
-        mOutputEntity->pause();
+    if (mDisplaySurface) {
+        mDisplaySurface->pause();
     }
     PIPELINE_LOGI("PipelineFacade paused");
 }
@@ -134,8 +140,8 @@ void PipelineFacade::resume() {
     if (mPipelineManager) {
         mPipelineManager->resume();
     }
-    if (mOutputEntity) {
-        mOutputEntity->resume();
+    if (mDisplaySurface) {
+        mDisplaySurface->resume();
     }
     PIPELINE_LOGI("PipelineFacade resumed");
 }
@@ -144,13 +150,39 @@ void PipelineFacade::stop() {
     if (mPipelineManager) {
         mPipelineManager->stop();
     }
-    if (mOutputEntity) {
-        mOutputEntity->stop();
-    }
     PIPELINE_LOGI("PipelineFacade stopped");
 }
 
 void PipelineFacade::destroy() {
+    // 释放新版 I/O 实体
+    if (mNewInputEntity) {
+        mNewInputEntity.reset();
+    }
+    if (mNewOutputEntity) {
+        mNewOutputEntity->clearTargets();
+        mNewOutputEntity.reset();
+    }
+    
+    // 释放显示表面
+    if (mDisplaySurface) {
+        mDisplaySurface->release();
+        mDisplaySurface.reset();
+    }
+    
+    // 释放输入策略
+#if defined(__APPLE__)
+    if (mPixelBufferStrategy) {
+        mPixelBufferStrategy->release();
+        mPixelBufferStrategy.reset();
+    }
+#endif
+#if defined(__ANDROID__)
+    if (mOESStrategy) {
+        mOESStrategy->release();
+        mOESStrategy.reset();
+    }
+#endif
+
     if (mPipelineManager) {
         mPipelineManager->destroy();
         mPipelineManager.reset();
@@ -165,10 +197,6 @@ void PipelineFacade::destroy() {
         lrengine::render::LRRenderContext::Destroy(mRenderContext);
         mRenderContext = nullptr;
     }
-
-    mInputEntityId = InvalidEntityId;
-    mOutputEntityId = InvalidEntityId;
-    mOutputEntity = nullptr;
 
     {
         std::lock_guard<std::mutex> lock(mStateMutex);
@@ -244,21 +272,17 @@ bool PipelineFacade::feedNV12(const uint8_t* yData, const uint8_t* uvData,
 
 bool PipelineFacade::feedTexture(std::shared_ptr<lrengine::render::LRTexture> texture,
                                  uint32_t width, uint32_t height, uint64_t timestamp) {
-    if (!initialize() || !mPipelineManager) {
+    if (!initialize() || !mNewInputEntity || !texture) {
         return false;
     }
 
-    auto inputEntity = mPipelineManager->getInputEntity();
-    if (!inputEntity || !texture) {
-        return false;
-    }
-
-    auto packet = inputEntity->feedTexture(std::move(texture), width, height, timestamp);
-    if (packet && mPipelineManager->isRunning()) {
-        mPipelineManager->processFrame(packet);
-        return true;
-    }
-    return false;
+    // 使用新版 InputEntity 的纹理提交接口
+    return mNewInputEntity->submitTexture(
+        0, // textureId（对于 LRTexture 不需要）
+        width, 
+        height, 
+        static_cast<int64_t>(timestamp)
+    );
 }
 
 #if defined(__APPLE__)
@@ -268,74 +292,31 @@ bool PipelineFacade::feedPixelBuffer(void* pixelBuffer, uint64_t timestamp) {
         return false;
     }
 
-    if (!initialize() || !mPipelineManager) {
-        // 通常需要先通过 setupDisplayOutput 创建并启动管线
-        return false;
-    }
-
-    auto inputEntity = mPipelineManager->getInputEntity();
-    if (!inputEntity) {
+    if (!initialize() || !mNewInputEntity) {
+        PIPELINE_LOGE("Pipeline not initialized or InputEntity not created");
         return false;
     }
 
     CVPixelBufferRef buffer = static_cast<CVPixelBufferRef>(pixelBuffer);
-    CVReturn lockStatus = CVPixelBufferLockBaseAddress(buffer, kCVPixelBufferLock_ReadOnly);
-    if (lockStatus != kCVReturnSuccess) {
+
+    // 使用 PixelBufferInputStrategy（零拷贝路径）
+    if (mPixelBufferStrategy) {
+        bool ok = mPixelBufferStrategy->submitPixelBuffer(buffer, static_cast<int64_t>(timestamp));
+        if (ok) {
+            // 触发双路 InputEntity 处理
+            input::InputData inputData;
+            inputData.dataType = input::InputDataType::PlatformBuffer;
+            inputData.cpu.timestamp = static_cast<int64_t>(timestamp);
+            inputData.cpu.width = static_cast<uint32_t>(CVPixelBufferGetWidth(buffer));
+            inputData.cpu.height = static_cast<uint32_t>(CVPixelBufferGetHeight(buffer));
+            
+            return mNewInputEntity->submitData(inputData);
+        }
         return false;
     }
 
-    const size_t width = CVPixelBufferGetWidth(buffer);
-    const size_t height = CVPixelBufferGetHeight(buffer);
-    const OSType format = CVPixelBufferGetPixelFormatType(buffer);
-    const size_t bytesPerRow = CVPixelBufferGetBytesPerRow(buffer);
-    auto* base = static_cast<uint8_t*>(CVPixelBufferGetBaseAddress(buffer));
-
-    bool ok = false;
-
-    if (format == kCVPixelFormatType_32BGRA) {
-        // 将 BGRA 转为 RGBA 再送入管线
-        const size_t pixelCount = width * height;
-        std::vector<uint8_t> rgba(pixelCount * 4);
-
-        for (size_t y = 0; y < height; ++y) {
-            const uint8_t* srcRow = base + y * bytesPerRow;
-            uint8_t* dstRow = rgba.data() + y * width * 4;
-            for (size_t x = 0; x < width; ++x) {
-                const uint8_t* s = srcRow + x * 4;
-                uint8_t* d = dstRow + x * 4;
-                d[0] = s[2]; // R
-                d[1] = s[1]; // G
-                d[2] = s[0]; // B
-                d[3] = s[3]; // A
-            }
-        }
-
-        auto packet = inputEntity->feedRGBA(rgba.data(),
-                                            static_cast<uint32_t>(width),
-                                            static_cast<uint32_t>(height),
-                                            static_cast<uint32_t>(width * 4),
-                                            timestamp);
-        if (packet && mPipelineManager->isRunning()) {
-            mPipelineManager->processFrame(packet);
-            ok = true;
-        }
-    } else if (format == kCVPixelFormatType_32RGBA) {
-        auto packet = inputEntity->feedRGBA(base,
-                                            static_cast<uint32_t>(width),
-                                            static_cast<uint32_t>(height),
-                                            static_cast<uint32_t>(bytesPerRow),
-                                            timestamp);
-        if (packet && mPipelineManager->isRunning()) {
-            mPipelineManager->processFrame(packet);
-            ok = true;
-        }
-    } else {
-        // 其他格式（如 NV12）当前未实现，可在之后扩展
-        ok = false;
-    }
-
-    CVPixelBufferUnlockBaseAddress(buffer, kCVPixelBufferLock_ReadOnly);
-    return ok;
+    PIPELINE_LOGE("PixelBufferInputStrategy not initialized");
+    return false;
 }
 
 #endif // defined(__APPLE__)
@@ -368,7 +349,17 @@ int32_t PipelineFacade::setupDisplayOutput(void* surface, int32_t width, int32_t
         PIPELINE_LOGI("Render context created for display output");
     }
 
-    // 创建 PipelineManager 与预设管线
+    // 创建平台特定的 DisplaySurface
+    if (!mDisplaySurface) {
+        mDisplaySurface = createPlatformDisplaySurface(surface, width, height);
+        if (!mDisplaySurface) {
+            PIPELINE_LOGE("Failed to create platform DisplaySurface");
+            return -1;
+        }
+        PIPELINE_LOGI("Platform DisplaySurface created");
+    }
+
+    // 创建 PipelineManager
     if (!mPipelineManager) {
         PipelineConfig pipelineConfig;
         pipelineConfig.name = "CameraPreview";
@@ -388,11 +379,12 @@ int32_t PipelineFacade::setupDisplayOutput(void* surface, int32_t width, int32_t
             return -1;
         }
 
-        if (!createPresetPipeline(mConfig.preset)) {
+        // 创建新版 I/O 实体
+        if (!createIOEntities()) {
             if (mCallbacks.onError) {
-                mCallbacks.onError("Failed to create preset pipeline");
+                mCallbacks.onError("Failed to create I/O entities");
             }
-            PIPELINE_LOGE("Failed to create preset pipeline");
+            PIPELINE_LOGE("Failed to create I/O entities");
             return -1;
         }
 
@@ -418,65 +410,106 @@ int32_t PipelineFacade::setupDisplayOutput(void* surface, int32_t width, int32_t
         mPipelineManager->start();
     }
 
-    if (!mOutputEntity) {
-        auto outputBase = mPipelineManager->getEntity(mOutputEntityId);
-        mOutputEntity = outputBase ? dynamic_cast<OutputEntityExt*>(outputBase.get()) : nullptr;
-        if (mOutputEntity) {
-            mOutputEntity->setRenderContext(mRenderContext);
-            if (mPlatformContext) {
-                mOutputEntity->setPlatformContext(mPlatformContext.get());
-            }
-        }
+    // 配置显示输出目标
+    if (mDisplaySurface && mNewOutputEntity) {
+        auto displayTarget = std::make_shared<output::DisplayOutputTarget>("display_main");
+        displayTarget->setDisplaySurface(mDisplaySurface);
+        
+        output::DisplayConfig displayConfig;
+        displayConfig.fillMode = output::DisplayFillMode::AspectFit;
+        displayTarget->setDisplayConfig(displayConfig);
+        
+        mNewOutputEntity->addTarget(displayTarget);
+        PIPELINE_LOGI("DisplaySurface attached to OutputEntity");
     }
 
-    if (!mOutputEntity) {
-        PIPELINE_LOGE("Failed to create output entity");
-        return -1;
-    }
-
-    return mOutputEntity->setupDisplayOutput(surface, width, height);
+    // 返回目标 ID（简化实现，使用固定 ID）
+    return 0;
 }
 
 int32_t PipelineFacade::setupEncoderOutput(void* encoderSurface, EncoderType encoderType) {
-    if (!mOutputEntity) {
+    if (!mNewOutputEntity) {
+        PIPELINE_LOGE("OutputEntity not created");
         return -1;
     }
-    return mOutputEntity->setupEncoderOutput(encoderSurface, encoderType);
+    
+    // TODO: 创建编码器输出目标
+    (void)encoderSurface;
+    (void)encoderType;
+    PIPELINE_LOGW("setupEncoderOutput not yet implemented in new architecture");
+    return -1;
 }
 
 int32_t PipelineFacade::setupCallbackOutput(FrameCallback callback, OutputDataFormat dataFormat) {
-    if (!mOutputEntity) {
+    if (!mNewOutputEntity) {
+        PIPELINE_LOGE("OutputEntity not created");
         return -1;
     }
-    return mOutputEntity->setupCallbackOutput(std::move(callback), dataFormat);
+    
+    auto callbackTarget = std::make_shared<output::CallbackOutputTarget>("callback_output");
+    
+    // 根据数据格式设置 CPU 或 GPU 回调
+    if (dataFormat == OutputDataFormat::RGBA || dataFormat == OutputDataFormat::NV12) {
+        callbackTarget->setCPUCallback([callback](const uint8_t* data, size_t size,
+                                                   uint32_t w, uint32_t h,
+                                                   output::OutputFormat fmt, int64_t ts) {
+            if (callback) {
+                // 创建简化的帧数据结构传递给回调
+                // TODO: 完善回调数据传递
+            }
+        });
+    }
+    
+    mNewOutputEntity->addTarget(callbackTarget);
+    PIPELINE_LOGI("Callback output target added");
+    return static_cast<int32_t>(mNewOutputEntity->getTargets().size() - 1);
 }
 
 int32_t PipelineFacade::setupFileOutput(const std::string& filePath) {
-    if (!mOutputEntity) {
+    if (!mNewOutputEntity) {
+        PIPELINE_LOGE("OutputEntity not created");
         return -1;
     }
-    return mOutputEntity->setupFileOutput(filePath);
+    
+    // TODO: 创建文件输出目标
+    (void)filePath;
+    PIPELINE_LOGW("setupFileOutput not yet implemented in new architecture");
+    return -1;
 }
 
 bool PipelineFacade::removeOutputTarget(int32_t targetId) {
-    if (!mOutputEntity) {
+    if (!mNewOutputEntity) {
         return false;
     }
-    return mOutputEntity->removeOutputTarget(targetId);
+    
+    const auto& targets = mNewOutputEntity->getTargets();
+    if (targetId >= 0 && static_cast<size_t>(targetId) < targets.size()) {
+        mNewOutputEntity->removeTarget(targets[targetId]->getName());
+        return true;
+    }
+    return false;
 }
 
 void PipelineFacade::setOutputTargetEnabled(int32_t targetId, bool enabled) {
-    if (!mOutputEntity) {
+    if (!mNewOutputEntity) {
         return;
     }
-    mOutputEntity->setOutputTargetEnabled(targetId, enabled);
+    
+    const auto& targets = mNewOutputEntity->getTargets();
+    if (targetId >= 0 && static_cast<size_t>(targetId) < targets.size()) {
+        targets[targetId]->setEnabled(enabled);
+    }
 }
 
 bool PipelineFacade::updateDisplayOutputSize(int32_t targetId, int32_t width, int32_t height) {
-    if (!mOutputEntity) {
+    if (!mDisplaySurface) {
         return false;
     }
-    return mOutputEntity->updateDisplayOutputSize(targetId, width, height);
+    
+    (void)targetId;
+    mDisplaySurface->setSize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+    mDisplaySurface->onSizeChanged(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+    return true;
 }
 
 // 滤镜占位
@@ -542,9 +575,11 @@ ExecutionStats PipelineFacade::getStats() const {
     return ExecutionStats();
 }
 
-OutputEntityExt::OutputStats PipelineFacade::getOutputStats() const {
-    // TODO: 实现
-    return OutputEntityExt::OutputStats();
+uint64_t PipelineFacade::getOutputFrameCount() const {
+    if (mNewOutputEntity) {
+        return mNewOutputEntity->getOutputFrameCount();
+    }
+    return 0;
 }
 
 void PipelineFacade::resetStats() {}
@@ -574,47 +609,37 @@ bool PipelineFacade::loadConfig(const std::string& filePath) {
     return false;
 }
 
-bool PipelineFacade::createPresetPipeline(PipelinePreset preset) {
+bool PipelineFacade::createIOEntities() {
     if (!mPipelineManager) {
         PIPELINE_LOGE("PipelineManager is not initialized");
         return false;
     }
 
-    // 当前仅实现 CameraPreview 预设，其它预设暂时复用相同结构
-    if (preset != PipelinePreset::CameraPreview && preset != PipelinePreset::Custom) {
-        preset = PipelinePreset::CameraPreview;
-    }
+    // 创建新版 InputEntity（双路分发）
+    mNewInputEntity = std::make_shared<input::InputEntity>("InputEntity");
+    mNewInputEntity->setRenderContext(mRenderContext);
 
-    // 创建输入和输出实体
-    EntityId inputId = mPipelineManager->createEntity<InputEntity>("InputEntity");
-    EntityId outputId = mPipelineManager->createEntity<OutputEntityExt>("OutputEntityExt");
+    // 配置输入
+    input::InputConfig inputConfig;
+    inputConfig.enableDualOutput = true;
+    inputConfig.width = mConfig.renderWidth;
+    inputConfig.height = mConfig.renderHeight;
+    mNewInputEntity->configure(inputConfig);
 
-    mInputEntityId = inputId;
-    mOutputEntityId = outputId;
+    // 创建平台特定的输入策略
+    createPlatformInputStrategy();
 
-    auto inputBase = mPipelineManager->getEntity(inputId);
-    auto outputBase = mPipelineManager->getEntity(outputId);
+    // 创建新版 OutputEntity（多目标输出）
+    mNewOutputEntity = std::make_shared<output::OutputEntity>("OutputEntity");
+    
+    output::OutputConfig outputConfig;
+    outputConfig.enableMultiTarget = true;
+    outputConfig.asyncOutput = mConfig.enableAsync;
+    outputConfig.outputQueueSize = static_cast<size_t>(mConfig.maxQueueSize);
+    mNewOutputEntity->configure(outputConfig);
 
-    auto* inputEntity = dynamic_cast<InputEntity*>(inputBase.get());
-    mOutputEntity = dynamic_cast<OutputEntityExt*>(outputBase.get());
-
-    if (inputEntity) {
-        inputEntity->setRenderContext(mRenderContext);
-    }
-    if (mOutputEntity) {
-        mOutputEntity->setRenderContext(mRenderContext);
-        if (mPlatformContext) {
-            mOutputEntity->setPlatformContext(mPlatformContext.get());
-        }
-    }
-
-    // 将输入与输出连接
-    mPipelineManager->connect(inputId, outputId);
-    mPipelineManager->setInputEntity(inputId);
-    mPipelineManager->setOutputEntity(outputId);
-
-    PIPELINE_LOGI("Preset pipeline created");
-    return inputEntity != nullptr && mOutputEntity != nullptr;
+    PIPELINE_LOGI("I/O entities created (dual-path architecture)");
+    return mNewInputEntity != nullptr && mNewOutputEntity != nullptr;
 }
 
 bool PipelineFacade::initializePlatformContext() {
@@ -673,6 +698,122 @@ bool PipelineFacade::initializeRenderContext() {
 
     mRenderContext = LRRenderContext::Create(desc);
     return mRenderContext != nullptr;
+}
+
+// =============================================================================
+// 新架构辅助函数
+// =============================================================================
+
+output::DisplaySurfacePtr PipelineFacade::createPlatformDisplaySurface(
+    void* surface, int32_t width, int32_t height) {
+    
+    output::DisplaySurfacePtr displaySurface;
+
+#if defined(__APPLE__)
+    // iOS/macOS: 使用 Metal 显示表面
+    auto metalSurface = std::make_shared<output::ios::iOSMetalSurface>();
+    
+    // 从 PlatformContext 获取 Metal 管理器
+#if defined(PIPELINE_PLATFORM_IOS) || defined(PIPELINE_PLATFORM_MACOS)
+    if (mPlatformContext) {
+        auto* metalManager = mPlatformContext->getIOSMetalManager();
+        if (metalManager) {
+            metalSurface->setMetalContextManager(metalManager);
+        }
+    }
+#endif
+    
+    // 绑定到 CAMetalLayer
+    if (!metalSurface->attachToLayer(surface)) {
+        PIPELINE_LOGE("Failed to attach Metal surface to layer");
+        return nullptr;
+    }
+    
+    // 初始化
+    if (!metalSurface->initialize(mRenderContext)) {
+        PIPELINE_LOGE("Failed to initialize Metal surface");
+        return nullptr;
+    }
+    
+    metalSurface->setSize(
+        width > 0 ? static_cast<uint32_t>(width) : mConfig.renderWidth,
+        height > 0 ? static_cast<uint32_t>(height) : mConfig.renderHeight
+    );
+    
+    displaySurface = metalSurface;
+    PIPELINE_LOGI("iOS Metal DisplaySurface created");
+
+#elif defined(__ANDROID__)
+    // Android: 使用 EGL 显示表面
+    auto eglSurface = std::make_shared<output::android::AndroidEGLSurface>();
+    
+    // 绑定到 ANativeWindow
+    if (!eglSurface->attachToWindow(surface)) {
+        PIPELINE_LOGE("Failed to attach EGL surface to window");
+        return nullptr;
+    }
+    
+    // 初始化
+    if (!eglSurface->initialize(mRenderContext)) {
+        PIPELINE_LOGE("Failed to initialize EGL surface");
+        return nullptr;
+    }
+    
+    eglSurface->setSize(
+        width > 0 ? static_cast<uint32_t>(width) : mConfig.renderWidth,
+        height > 0 ? static_cast<uint32_t>(height) : mConfig.renderHeight
+    );
+    
+    displaySurface = eglSurface;
+    PIPELINE_LOGI("Android EGL DisplaySurface created");
+
+#else
+    // 其他平台暂不支持
+    PIPELINE_LOGW("Platform-specific DisplaySurface not available");
+    (void)surface;
+    (void)width;
+    (void)height;
+#endif
+
+    return displaySurface;
+}
+
+void PipelineFacade::createPlatformInputStrategy() {
+#if defined(__APPLE__)
+    // iOS: 使用 PixelBufferInputStrategy（零拷贝）
+    mPixelBufferStrategy = std::make_shared<input::ios::PixelBufferInputStrategy>();
+    
+    // 从 PlatformContext 获取 Metal 管理器
+#if defined(PIPELINE_PLATFORM_IOS) || defined(PIPELINE_PLATFORM_MACOS)
+    if (mPlatformContext) {
+        auto* metalManager = mPlatformContext->getIOSMetalManager();
+        if (metalManager) {
+            mPixelBufferStrategy->setMetalContextManager(metalManager);
+        }
+    }
+#endif
+    
+    // 初始化策略
+    if (mPixelBufferStrategy->initialize(mRenderContext)) {
+        mNewInputEntity->setInputStrategy(mPixelBufferStrategy);
+        PIPELINE_LOGI("PixelBufferInputStrategy initialized");
+    } else {
+        PIPELINE_LOGE("Failed to initialize PixelBufferInputStrategy");
+        mPixelBufferStrategy.reset();
+    }
+
+#elif defined(__ANDROID__)
+    // Android: 使用 OESTextureInputStrategy
+    mOESStrategy = std::make_shared<input::android::OESTextureInputStrategy>();
+    
+    if (mOESStrategy->initialize(mRenderContext)) {
+        mNewInputEntity->setInputStrategy(mOESStrategy);
+        PIPELINE_LOGI("OESTextureInputStrategy initialized");
+    } else {
+        PIPELINE_LOGE("Failed to initialize OESTextureInputStrategy");
+        mOESStrategy.reset();
+    }
+#endif
 }
 
 // 工具函数

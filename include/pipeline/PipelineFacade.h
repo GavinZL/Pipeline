@@ -18,13 +18,32 @@
 #pragma once
 
 #include "pipeline/core/PipelineManager.h"
-#include "pipeline/entity/OutputEntityExt.h"
 #include "pipeline/platform/PlatformContext.h"
+#include "pipeline/input/InputEntity.h"
+#include "pipeline/output/OutputEntity.h"
+#include "pipeline/output/DisplaySurface.h"
 #include <memory>
 #include <string>
 #include <functional>
 
+// 前向声明平台特定策略
 namespace pipeline {
+namespace input {
+namespace ios {
+class PixelBufferInputStrategy;
+} // namespace ios
+namespace android {
+class OESTextureInputStrategy;
+} // namespace android
+} // namespace input
+} // namespace pipeline
+
+namespace pipeline {
+
+// 类型别名，简化命名空间
+using InputFormat = input::InputFormat;
+using EncoderType = output::EncoderType;
+using OutputDataFormat = output::OutputFormat;
 
 // =============================================================================
 // 管线预设类型
@@ -276,7 +295,7 @@ public:
      * @param encoderType 编码器类型
      * @return 输出目标ID
      */
-    int32_t setupEncoderOutput(void* encoderSurface, EncoderType encoderType = EncoderType::Hardware);
+    int32_t setupEncoderOutput(void* encoderSurface, EncoderType encoderType = EncoderType::H264);
     
     /**
      * @brief 设置回调输出
@@ -285,7 +304,7 @@ public:
      * @return 输出目标ID
      */
     int32_t setupCallbackOutput(FrameCallback callback,
-                                OutputDataFormat dataFormat = OutputDataFormat::RGBA8);
+                                OutputDataFormat dataFormat = OutputDataFormat::RGBA);
     
     /**
      * @brief 设置文件输出
@@ -432,9 +451,9 @@ public:
     ExecutionStats getStats() const;
     
     /**
-     * @brief 获取输出统计
+     * @brief 获取输出帧数统计
      */
-    OutputEntityExt::OutputStats getOutputStats() const;
+    uint64_t getOutputFrameCount() const;
     
     /**
      * @brief 重置统计
@@ -492,11 +511,6 @@ private:
     explicit PipelineFacade(const PipelineFacadeConfig& config);
     
     /**
-     * @brief 创建预设管线
-     */
-    bool createPresetPipeline(PipelinePreset preset);
-    
-    /**
      * @brief 初始化平台上下文
      */
     bool initializePlatformContext();
@@ -507,9 +521,20 @@ private:
     bool initializeRenderContext();
     
     /**
-     * @brief 创建输入输出Entity
+     * @brief 创建输入输出Entity（新版双路架构）
      */
     bool createIOEntities();
+    
+    /**
+     * @brief 创建平台特定的输入策略
+     */
+    void createPlatformInputStrategy();
+    
+    /**
+     * @brief 创建平台特定的显示表面
+     */
+    output::DisplaySurfacePtr createPlatformDisplaySurface(
+        void* surface, int32_t width, int32_t height);
     
     /**
      * @brief 应用质量设置
@@ -526,10 +551,20 @@ private:
     std::unique_ptr<PlatformContext> mPlatformContext;
     lrengine::render::LRRenderContext* mRenderContext = nullptr;
     
-    // Entity引用
-    EntityId mInputEntityId = InvalidEntityId;
-    EntityId mOutputEntityId = InvalidEntityId;
-    OutputEntityExt* mOutputEntity = nullptr;
+    // 双路 I/O 实体
+    std::shared_ptr<input::InputEntity> mNewInputEntity;
+    std::shared_ptr<output::OutputEntity> mNewOutputEntity;
+    
+    // 平台特定显示表面
+    output::DisplaySurfacePtr mDisplaySurface;
+    
+    // 平台特定输入策略
+#if defined(__APPLE__)
+    std::shared_ptr<input::ios::PixelBufferInputStrategy> mPixelBufferStrategy;
+#endif
+#if defined(__ANDROID__)
+    std::shared_ptr<input::android::OESTextureInputStrategy> mOESStrategy;
+#endif
     
     // 状态
     bool mInitialized = false;

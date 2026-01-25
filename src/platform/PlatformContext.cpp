@@ -81,8 +81,8 @@ bool PlatformContext::initialize(const PlatformContextConfig& config) {
     }
 #endif
     
-#if defined(PIPELINE_PLATFORM_IOS)
-    if (mPlatformType == PlatformType::iOS) {
+#if defined(PIPELINE_PLATFORM_IOS) || defined(PIPELINE_PLATFORM_MACOS)
+    if (mPlatformType == PlatformType::iOS || mPlatformType == PlatformType::macOS) {
         mIOSMetalManager = std::make_unique<IOSMetalContextManager>();
         success = mIOSMetalManager->initialize(config.iosConfig);
         if (!success) {
@@ -183,7 +183,7 @@ std::shared_ptr<lrengine::render::LRTexture> PlatformContext::createTextureFromO
 
 #endif // __ANDROID__
 
-#if defined(PIPELINE_PLATFORM_IOS)
+#if defined(PIPELINE_PLATFORM_IOS) || defined(PIPELINE_PLATFORM_MACOS)
 
 std::shared_ptr<lrengine::render::LRTexture> PlatformContext::createTextureFromPixelBuffer(
     CVPixelBufferRef pixelBuffer,
@@ -209,6 +209,6 @@ bool PlatformContext::copyTextureToPixelBuffer(
     return mIOSMetalManager->copyTextureToPixelBuffer(texture, pixelBuffer);
 }
 
-#endif // PIPELINE_PLATFORM_IOS
+#endif // PIPELINE_PLATFORM_IOS || PIPELINE_PLATFORM_MACOS
 
 } // namespace pipeline
