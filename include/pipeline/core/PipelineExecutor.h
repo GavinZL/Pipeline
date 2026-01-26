@@ -111,16 +111,8 @@ public:
     // 资源池
     // ==========================================================================
     
-    /**
-     * @brief 设置纹理池
-     */
-    void setTexturePool(std::shared_ptr<TexturePool> pool);
-    
-    /**
-     * @brief 设置帧包池
-     */
-    void setFramePacketPool(std::shared_ptr<FramePacketPool> pool);
-    
+    void setContext(std::shared_ptr<PipelineContext> context) { mContext = context; }
+
     /**
      * @brief 获取管线上下文
      */

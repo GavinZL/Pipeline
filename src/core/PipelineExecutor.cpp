@@ -54,17 +54,6 @@ bool PipelineExecutor::initialize() {
         return false;
     }
     
-    // 创建管线上下文
-    mContext = std::make_shared<PipelineContext>();
-    
-    // 设置资源池
-    if (mTexturePool) {
-        mContext->setTexturePool(mTexturePool);
-    }
-    if (mFramePacketPool) {
-        mContext->setFramePacketPool(mFramePacketPool);
-    }
-    
     // 更新执行计划
     updateExecutionPlan();
     
@@ -88,24 +77,6 @@ void PipelineExecutor::shutdown() {
     
     mInitialized.store(false);
     PIPELINE_LOGI("PipelineExecutor shut down");
-}
-
-// =============================================================================
-// 资源池
-// =============================================================================
-
-void PipelineExecutor::setTexturePool(std::shared_ptr<TexturePool> pool) {
-    mTexturePool = pool;
-    if (mContext) {
-        mContext->setTexturePool(mTexturePool);
-    }
-}
-
-void PipelineExecutor::setFramePacketPool(std::shared_ptr<FramePacketPool> pool) {
-    mFramePacketPool = pool;
-    if (mContext) {
-        mContext->setFramePacketPool(mFramePacketPool);
-    }
 }
 
 // =============================================================================

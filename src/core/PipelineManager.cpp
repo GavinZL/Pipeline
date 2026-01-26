@@ -90,8 +90,10 @@ bool PipelineManager::initialize() {
     execConfig.enableFrameSkipping = getConfig().enableFrameSkipping;
     
     mExecutor = std::make_unique<PipelineExecutor>(mGraph.get(), execConfig);
-    mExecutor->setTexturePool(mTexturePool);
-    mExecutor->setFramePacketPool(mFramePacketPool);
+    
+    mContext->setTexturePool(mTexturePool);
+    mContext->setFramePacketPool(mFramePacketPool);
+    mExecutor->setContext(mContext);
     
     if (!mExecutor->initialize()) {
         PIPELINE_LOGE("Failed to initialize executor");
