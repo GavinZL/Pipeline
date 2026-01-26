@@ -220,7 +220,7 @@ bool PipelineGraph::connect(EntityId srcId, EntityId dstId) {
     
     // 查找默认端口
     if (srcEntity->getOutputPortCount() > 0) {
-        auto port = srcEntity->getOutputPort("output");
+        auto port = srcEntity->getOutputPort(srcPort);
         if (!port) {
             port = srcEntity->getOutputPort(size_t(0));
         }
@@ -230,7 +230,7 @@ bool PipelineGraph::connect(EntityId srcId, EntityId dstId) {
     }
     
     if (dstEntity->getInputPortCount() > 0) {
-        auto port = dstEntity->getInputPort("input");
+        auto port = dstEntity->getInputPort(dstPort);
         if (!port) {
             port = dstEntity->getInputPort(size_t(0));
         }
@@ -741,6 +741,7 @@ void PipelineGraph::computeExecutionLevels() const {
             int maxPredLevel = -1;
             auto inEdges = mIncomingEdges.find(id);
             if (inEdges != mIncomingEdges.end()) {
+                // 找到入度最大节点的 level， 在此基础上 + 1
                 for (const auto& conn : inEdges->second) {
                     maxPredLevel = std::max(maxPredLevel, levels[conn.srcEntity]);
                 }

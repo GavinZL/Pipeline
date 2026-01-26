@@ -41,8 +41,7 @@ std::shared_ptr<PipelineManager> PipelineManager::create(
 
 PipelineManager::PipelineManager(lrengine::render::LRRenderContext* renderContext,
                                  const PipelineConfig& config)
-    : mConfig(config)
-    , mRenderContext(renderContext)
+    : mRenderContext(renderContext)
 {
     // 创建图
     mGraph = std::make_unique<PipelineGraph>();
@@ -57,6 +56,7 @@ PipelineManager::PipelineManager(lrengine::render::LRRenderContext* renderContex
 
 PipelineManager::~PipelineManager() {
     destroy();
+    PIPELINE_LOGI("Destroying PipelineManager");
 }
 
 // =============================================================================
@@ -85,9 +85,9 @@ bool PipelineManager::initialize() {
     
     // 创建执行器
     ExecutorConfig execConfig;
-    execConfig.maxConcurrentFrames = mConfig.maxConcurrentFrames;
-    execConfig.enableParallelExecution = mConfig.enableParallelExecution;
-    execConfig.enableFrameSkipping = mConfig.enableFrameSkipping;
+    execConfig.maxConcurrentFrames = getConfig().maxConcurrentFrames;
+    execConfig.enableParallelExecution = getConfig().enableParallelExecution;
+    execConfig.enableFrameSkipping = getConfig().enableFrameSkipping;
     
     mExecutor = std::make_unique<PipelineExecutor>(mGraph.get(), execConfig);
     mExecutor->setTexturePool(mTexturePool);
@@ -132,6 +132,7 @@ bool PipelineManager::start() {
     // 验证图
     auto validation = mGraph->validate();
     if (!validation.valid) {
+        PIPELINE_LOGE("Graph validation failed: %s", validation.errorMessage.c_str());
         return false;
     }
     
@@ -215,9 +216,11 @@ bool PipelineManager::removeEntity(EntityId entityId) {
     // 检查是否是特殊Entity
     if (entityId == mInputEntityId) {
         mInputEntityId = InvalidEntityId;
+        PIPELINE_LOGI("Removing input entity, entityId: %d", entityId);
     }
     if (entityId == mOutputEntityId) {
         mOutputEntityId = InvalidEntityId;
+        PIPELINE_LOGI("Removing output entity, entityId: %d", entityId);
     }
     
     return mGraph->removeEntity(entityId);
@@ -286,19 +289,21 @@ ValidationResult PipelineManager::validate() const {
 
 FramePacketPtr PipelineManager::processFrame(FramePacketPtr input) {
     if (mState != PipelineState::Running || !mExecutor || !input) {
+        PIPELINE_LOGE("PipelineManager is not in Running state or executor is null or input is null");
         return nullptr;
     }
     
     mExecutor->processFrame(input);
     
-    // 新的 output::OutputEntity 不提供 getLastOutput 方法
-    // 直接返回输入 packet
+
+    ///todo 处理输出, 返回输出数据包
     return input;
 }
 
 bool PipelineManager::processFrameAsync(FramePacketPtr input,
                                         std::function<void(FramePacketPtr)> callback) {
     if (mState != PipelineState::Running || !mExecutor || !input) {
+        PIPELINE_LOGE("PipelineManager is not in Running state or executor is null or input is null");
         return false;
     }
     
@@ -356,44 +361,6 @@ void PipelineManager::setInputEntity(EntityId entityId) {
 
 void PipelineManager::setOutputEntity(EntityId entityId) {
     mOutputEntityId = entityId;
-}
-
-FramePacketPtr PipelineManager::feedRGBA(const uint8_t* data,
-                                         uint32_t width, uint32_t height,
-                                         uint32_t stride,
-                                         uint64_t timestamp) {
-    auto inputEntity = getInputEntity();
-    if (!inputEntity) {
-        return nullptr;
-    }
-    
-    // 使用新的 input::InputEntity 接口
-    bool success = inputEntity->submitRGBA(data, width, height, static_cast<int64_t>(timestamp));
-    (void)stride; // 新接口不需要 stride
-    
-    // input::InputEntity 不返回 FramePacket，这里返回 nullptr
-    // 实际数据处理由 InputEntity 的 process 方法完成
-    return success ? std::make_shared<FramePacket>() : nullptr;
-}
-
-FramePacketPtr PipelineManager::feedYUV420(const uint8_t* yData,
-                                           const uint8_t* uData,
-                                           const uint8_t* vData,
-                                           uint32_t width, uint32_t height,
-                                           uint64_t timestamp) {
-    auto inputEntity = getInputEntity();
-    if (!inputEntity) {
-        return nullptr;
-    }
-    
-    // 使用新的 input::InputEntity 接口
-    bool success = inputEntity->submitYUV420P(yData, uData, vData, 
-                                              width, height,
-                                              width, width/2, width/2,  // 默认 stride
-                                              static_cast<int64_t>(timestamp));
-    
-    // input::InputEntity 不返回 FramePacket
-    return success ? std::make_shared<FramePacket>() : nullptr;
 }
 
 // =============================================================================
@@ -460,7 +427,6 @@ int32_t PipelineManager::setupDisplayOutput(void* surface, uint32_t width, uint3
     
     // 8. 记录
     mOutputTargets[targetId] = displayTarget;
-    mDisplaySurface = displaySurface;
     
     PIPELINE_LOGI("Display output configured, target ID: %d", targetId);
     return targetId;
@@ -739,8 +705,11 @@ bool PipelineManager::updateDisplayOutputSize(int32_t targetId, uint32_t width, 
 // 配置
 // =============================================================================
 
+const PipelineConfig& PipelineManager::getConfig() const {
+    return mContext->getConfig();
+}
+
 void PipelineManager::updateConfig(const PipelineConfig& config) {
-    mConfig = config;
     if (mContext) {
         mContext->setConfig(config);
     }
@@ -818,13 +787,13 @@ bool PipelineManager::createResourcePools() {
     // 创建纹理池
     TexturePoolConfig textureConfig;
     textureConfig.maxTexturesPerBucket = 4;
-    textureConfig.maxTotalTextures = mConfig.texturePoolSize;
+    textureConfig.maxTotalTextures = getConfig().texturePoolSize;
     
     mTexturePool = std::make_shared<TexturePool>(mRenderContext, textureConfig);
     
     // 创建帧包池
     FramePacketPoolConfig packetConfig;
-    packetConfig.capacity = mConfig.framePacketPoolSize;
+    packetConfig.capacity = getConfig().framePacketPoolSize;
     packetConfig.blockOnEmpty = true;
     packetConfig.enableBackpressure = true;
     

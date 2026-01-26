@@ -95,14 +95,14 @@ void PipelineExecutor::shutdown() {
 // =============================================================================
 
 void PipelineExecutor::setTexturePool(std::shared_ptr<TexturePool> pool) {
-    mTexturePool = std::move(pool);
+    mTexturePool = pool;
     if (mContext) {
         mContext->setTexturePool(mTexturePool);
     }
 }
 
 void PipelineExecutor::setFramePacketPool(std::shared_ptr<FramePacketPool> pool) {
-    mFramePacketPool = std::move(pool);
+    mFramePacketPool = pool;
     if (mContext) {
         mContext->setFramePacketPool(mFramePacketPool);
     }

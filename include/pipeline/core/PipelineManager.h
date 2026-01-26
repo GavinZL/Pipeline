@@ -259,29 +259,12 @@ public:
      */
     void setOutputEntity(EntityId entityId);
     
-    /**
-     * @brief 输入RGBA数据
-     */
-    FramePacketPtr feedRGBA(const uint8_t* data,
-                           uint32_t width, uint32_t height,
-                           uint32_t stride = 0,
-                           uint64_t timestamp = 0);
-    
-    /**
-     * @brief 输入YUV数据
-     */
-    FramePacketPtr feedYUV420(const uint8_t* yData,
-                             const uint8_t* uData,
-                             const uint8_t* vData,
-                             uint32_t width, uint32_t height,
-                             uint64_t timestamp = 0);
-    
     // ==========================================================================
     // 输入配置(新增)
     // ==========================================================================
     
     /**
-     * @brief 设置输入配置（通用方式）
+     * @brief 设置输入配置，创建并添加输入实体（通用方式）
      * @param config 输入配置
      * @return 输入实体 ID，失败返回 InvalidEntityId
      */
@@ -379,7 +362,7 @@ public:
     /**
      * @brief 获取配置
      */
-    const PipelineConfig& getConfig() const { return mConfig; }
+    const PipelineConfig& getConfig() const ;
     
     /**
      * @brief 更新配置
@@ -478,7 +461,6 @@ private:
     
 private:
     // 配置
-    PipelineConfig mConfig;
     lrengine::render::LRRenderContext* mRenderContext;
     
     // 状态
@@ -504,7 +486,6 @@ private:
     std::function<void(EntityId, const std::string&)> mErrorCallback;
     
     // 输出目标管理
-    std::shared_ptr<output::DisplaySurface> mDisplaySurface;
     std::map<int32_t, std::shared_ptr<output::OutputTarget>> mOutputTargets;
     std::atomic<int32_t> mNextTargetId{0};
     

@@ -27,11 +27,11 @@ void PipelineContext::setRenderContext(lrengine::render::LRRenderContext* contex
 // =============================================================================
 
 void PipelineContext::setTexturePool(std::shared_ptr<TexturePool> pool) {
-    mTexturePool = std::move(pool);
+    mTexturePool = pool;
 }
 
 void PipelineContext::setFramePacketPool(std::shared_ptr<FramePacketPool> pool) {
-    mFramePacketPool = std::move(pool);
+    mFramePacketPool = pool;
 }
 
 // =============================================================================
