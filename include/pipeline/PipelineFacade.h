@@ -236,31 +236,6 @@ public:
                    InputFormat format = InputFormat::RGBA,
                    uint64_t timestamp = 0);
     
-    /**
-     * @brief 输入RGBA数据
-     */
-    bool feedRGBA(const uint8_t* data, uint32_t width, uint32_t height,
-                  uint32_t stride = 0, uint64_t timestamp = 0);
-    
-    /**
-     * @brief 输入YUV420数据
-     */
-    bool feedYUV420(const uint8_t* yData, const uint8_t* uData, const uint8_t* vData,
-                    uint32_t width, uint32_t height, uint64_t timestamp = 0);
-    
-    /**
-     * @brief 输入NV12/NV21数据
-     */
-    bool feedNV12(const uint8_t* yData, const uint8_t* uvData,
-                  uint32_t width, uint32_t height,
-                  bool isNV21 = false, uint64_t timestamp = 0);
-    
-    /**
-     * @brief 输入GPU纹理
-     */
-    bool feedTexture(std::shared_ptr<lrengine::render::LRTexture> texture,
-                     uint32_t width, uint32_t height, uint64_t timestamp = 0);
-    
 #ifdef __ANDROID__
     /**
      * @brief 输入OES纹理（Android相机）
@@ -461,11 +436,6 @@ public:
     void resetStats();
     
     /**
-     * @brief 获取当前FPS
-     */
-    double getCurrentFPS() const;
-    
-    /**
      * @brief 获取平均处理时间（毫秒）
      */
     double getAverageProcessTime() const;
@@ -521,20 +491,19 @@ private:
     bool initializeRenderContext();
     
     /**
-     * @brief 创建输入输出Entity（新版双路架构）
+     * @brief 根据预设配置输入
      */
-    bool createIOEntities();
+    bool setupInputBasedOnPreset();
     
     /**
-     * @brief 创建平台特定的输入策略
+     * @brief 创建输出实体
      */
-    void createPlatformInputStrategy();
+    bool setupOutputEntity();
     
     /**
-     * @brief 创建平台特定的显示表面
+     * @brief 配置回调桥接
      */
-    output::DisplaySurfacePtr createPlatformDisplaySurface(
-        void* surface, int32_t width, int32_t height);
+    void setupCallbackBridges();
     
     /**
      * @brief 应用质量设置
@@ -551,28 +520,9 @@ private:
     std::unique_ptr<PlatformContext> mPlatformContext;
     lrengine::render::LRRenderContext* mRenderContext = nullptr;
     
-    // 双路 I/O 实体
-    std::shared_ptr<input::InputEntity> mNewInputEntity;
-    std::shared_ptr<output::OutputEntity> mNewOutputEntity;
-    
-    // 平台特定显示表面
-    output::DisplaySurfacePtr mDisplaySurface;
-    
-    // 平台特定输入策略
-#if defined(__APPLE__)
-    std::shared_ptr<input::ios::PixelBufferInputStrategy> mPixelBufferStrategy;
-#endif
-#if defined(__ANDROID__)
-    std::shared_ptr<input::android::OESTextureInputStrategy> mOESStrategy;
-#endif
-    
     // 状态
     bool mInitialized = false;
     mutable std::mutex mStateMutex;
-    
-    // 性能统计
-    std::chrono::steady_clock::time_point mLastFrameTime;
-    double mCurrentFPS = 0.0;
 };
 
 // =============================================================================

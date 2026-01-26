@@ -7,6 +7,7 @@
 
 #import "pipeline/output/ios/iOSMetalSurface.h"
 #import "pipeline/utils/PipelineLog.h"
+#import "lrengine/core/LRTexture.h"
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <simd/simd.h>
@@ -248,9 +249,20 @@ bool iOSMetalSurface::renderTexture(std::shared_ptr<lrengine::render::LRTexture>
     }
     [encoder setVertexBytes:&transformMatrix length:sizeof(transformMatrix) atIndex:1];
     
-    // TODO: 设置纹理（从 LRTexture 获取 Metal 纹理）
-    // id<MTLTexture> mtlTexture = ...;
-    // [encoder setFragmentTexture:mtlTexture atIndex:0];
+    // 设置纹理（直接通过 GetNativeHandle 获取 Metal 纹理）
+    if (texture) {
+        auto handle = texture->GetNativeHandle();
+        id<MTLTexture> mtlTexture = (__bridge id<MTLTexture>)handle.ptr;
+        if (mtlTexture) {
+            PIPELINE_LOGD("Binding Metal texture to fragment shader: %zux%zu", 
+                          mtlTexture.width, mtlTexture.height);
+            [encoder setFragmentTexture:mtlTexture atIndex:0];
+        } else {
+            PIPELINE_LOGW("Failed to get Metal texture from LRTexture");
+        }
+    } else {
+        PIPELINE_LOGW("Input texture is null");
+    }
     
     // 设置采样器
     id<MTLSamplerState> sampler = (__bridge id<MTLSamplerState>)mSamplerState;

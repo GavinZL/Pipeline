@@ -15,7 +15,6 @@
 #include "entity/GPUEntity.h"
 #include "entity/CPUEntity.h"
 #include "entity/CompositeEntity.h"
-#include "entity/IOEntity.h"
 
 // 核心层
 #include "core/PipelineConfig.h"
@@ -32,9 +31,6 @@
 
 // 外观接口（推荐使用）
 #include "PipelineFacade.h"
-
-// 扩展实体
-#include "entity/OutputEntityExt.h"
 
 /**
  * @namespace pipeline
@@ -69,11 +65,13 @@
  * // 使用管理器接口（高级）
  * auto pipeline = PipelineManager::create(renderContext);
  * 
- * // 添加Entity
- * auto inputId = pipeline->createEntity<InputEntity>("input");
+ * // 配置输入输出
+ * auto inputId = pipeline->setupPixelBufferInput(1920, 1080);
+ * auto outputId = pipeline->setupDisplayOutput(surface, 1920, 1080);
+ * 
+ * // 添加处理Entity
  * auto beautyId = pipeline->createEntity<BeautyEntity>("beauty");
  * auto filterId = pipeline->createEntity<FilterEntity>("filter");
- * auto outputId = pipeline->createEntity<OutputEntityExt>("output");
  * 
  * // 建立连接
  * pipeline->connect(inputId, beautyId);

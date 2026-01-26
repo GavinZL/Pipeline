@@ -59,7 +59,6 @@ set(PIPELINE_CORE_SOURCES
     src/entity/GPUEntity.cpp
     src/entity/CPUEntity.cpp
     src/entity/CompositeEntity.cpp
-    src/entity/IOEntity.cpp
     
     # 核心层
     src/core/PipelineGraph.cpp
@@ -96,7 +95,6 @@ endif()
 # 扩展实体源文件
 # ============================================
 set(PIPELINE_EXTENDED_SOURCES
-    src/entity/OutputEntityExt.cpp
     src/entity/MergeEntity.cpp
 )
 

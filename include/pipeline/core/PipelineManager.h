@@ -9,8 +9,11 @@
 #include "PipelineConfig.h"
 #include "PipelineGraph.h"
 #include "PipelineExecutor.h"
+#include "pipeline/output/OutputConfig.h"
 #include <memory>
 #include <functional>
+#include <map>
+#include <atomic>
 
 // 前向声明
 namespace lrengine {
@@ -22,8 +25,22 @@ class LRRenderContext;
 namespace pipeline {
 
 // 前向声明
+namespace input {
 class InputEntity;
+class InputConfig;
+namespace ios {
+class PixelBufferInputStrategy;
+} // namespace ios
+namespace android {
+class OESTextureInputStrategy;
+} // namespace android
+} // namespace input
+
+namespace output {
+class DisplaySurface;
+class OutputTarget;
 class OutputEntity;
+} // namespace output
 
 /**
  * @brief 管线状态
@@ -225,12 +242,12 @@ public:
     /**
      * @brief 获取输入Entity
      */
-    InputEntity* getInputEntity() const;
+    input::InputEntity* getInputEntity() const;
     
     /**
      * @brief 获取输出Entity
      */
-    OutputEntity* getOutputEntity() const;
+    output::OutputEntity* getOutputEntity() const;
     
     /**
      * @brief 设置输入Entity
@@ -259,15 +276,101 @@ public:
                              uint32_t width, uint32_t height,
                              uint64_t timestamp = 0);
     
-    /**
-     * @brief 设置显示Surface
-     */
-    void setDisplaySurface(void* surface);
+    // ==========================================================================
+    // 输入配置(新增)
+    // ==========================================================================
     
     /**
-     * @brief 设置编码器Surface
+     * @brief 设置输入配置（通用方式）
+     * @param config 输入配置
+     * @return 输入实体 ID，失败返回 InvalidEntityId
      */
-    void setEncoderSurface(void* surface);
+    EntityId setupInput(const input::InputConfig& config);
+    
+#if defined(__APPLE__)
+    /**
+     * @brief 设置 PixelBuffer 输入（iOS/macOS）
+     * @param width 宽度
+     * @param height 高度
+     * @param metalManager Metal 上下文管理器（可选）
+     * @return 输入实体 ID
+     */
+    EntityId setupPixelBufferInput(uint32_t width, uint32_t height, void* metalManager = nullptr);
+#endif
+    
+#if defined(__ANDROID__)
+    /**
+     * @brief 设置 OES 纹理输入（Android 相机）
+     * @param width 宽度
+     * @param height 高度
+     * @return 输入实体 ID
+     */
+    EntityId setupOESInput(uint32_t width, uint32_t height);
+#endif
+    
+    /**
+     * @brief 设置 RGBA 输入
+     * @param width 宽度
+     * @param height 高度
+     * @return 输入实体 ID
+     */
+    EntityId setupRGBAInput(uint32_t width, uint32_t height);
+    
+    /**
+     * @brief 设置 YUV 输入
+     * @param width 宽度
+     * @param height 高度
+     * @return 输入实体 ID
+     */
+    EntityId setupYUVInput(uint32_t width, uint32_t height);
+    
+    // ==========================================================================
+    // 输出配置(扩展)
+    // ==========================================================================
+    
+    /**
+     * @brief 设置显示输出(完整配置)
+     * @param surface 平台 Surface (CAMetalLayer/ANativeWindow)
+     * @param width 显示宽度
+     * @param height 显示高度
+     * @return 输出目标 ID,失败返回 -1
+     */
+    int32_t setupDisplayOutput(void* surface, uint32_t width, uint32_t height);
+    
+    /**
+     * @brief 设置回调输出
+     * @param callback 帧回调函数
+     * @param dataFormat 数据格式
+     * @return 目标 ID
+     */
+    int32_t setupCallbackOutput(
+        std::function<void(const uint8_t*, size_t, uint32_t, uint32_t, 
+                          output::OutputFormat, int64_t)> callback,
+        output::OutputFormat dataFormat);
+    
+    /**
+     * @brief 设置编码器输出
+     * @param encoderSurface 编码器 Surface
+     * @param encoderType 编码器类型
+     * @return 目标 ID
+     */
+    int32_t setupEncoderOutput(void* encoderSurface, output::EncoderType encoderType);
+    
+    /**
+     * @brief 移除输出目标
+     * @param targetId 目标 ID
+     * @return 是否成功
+     */
+    bool removeOutputTarget(int32_t targetId);
+    
+    /**
+     * @brief 更新显示输出尺寸
+     * @param targetId 目标 ID
+     * @param width 新宽度
+     * @param height 新高度
+     * @return 是否成功
+     */
+    bool updateDisplayOutputSize(int32_t targetId, uint32_t width, uint32_t height);
     
     // ==========================================================================
     // 配置
@@ -399,6 +502,22 @@ private:
     std::function<void(FramePacketPtr)> mFrameCompleteCallback;
     std::function<void(FramePacketPtr)> mFrameDroppedCallback;
     std::function<void(EntityId, const std::string&)> mErrorCallback;
+    
+    // 输出目标管理
+    std::shared_ptr<output::DisplaySurface> mDisplaySurface;
+    std::map<int32_t, std::shared_ptr<output::OutputTarget>> mOutputTargets;
+    std::atomic<int32_t> mNextTargetId{0};
+    
+    // 输入实体管理
+    std::shared_ptr<input::InputEntity> mInputEntity;
+    
+    // 平台特定输入策略
+#if defined(__APPLE__)
+    std::shared_ptr<input::ios::PixelBufferInputStrategy> mPixelBufferStrategy;
+#endif
+#if defined(__ANDROID__)
+    std::shared_ptr<input::android::OESTextureInputStrategy> mOESStrategy;
+#endif
 };
 
 } // namespace pipeline

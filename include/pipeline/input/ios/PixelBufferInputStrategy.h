@@ -112,7 +112,7 @@ private:
     int64_t mCurrentTimestamp = 0;
     
     // 输出纹理
-    lrengine::LRTexturePtr mOutputTexture;
+    std::shared_ptr<lrengine::render::LRPlanarTexture> mOutputTexture;
     
     // 配置
     bool mUseTextureCache = true;

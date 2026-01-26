@@ -40,7 +40,7 @@
 namespace lrengine {
 namespace render {
 class LRRenderContext;
-class LRTexture;
+class LRPlanarTexture;
 } // namespace render
 } // namespace lrengine
 
@@ -207,7 +207,7 @@ public:
      * @param renderContext LREngine渲染上下文
      * @return LRTexture包装对象
      */
-    std::shared_ptr<lrengine::render::LRTexture> createTextureFromPixelBuffer(
+    std::shared_ptr<lrengine::render::LRPlanarTexture> createTextureFromPixelBuffer(
         CVPixelBufferRef pixelBuffer,
         lrengine::render::LRRenderContext* renderContext);
     
@@ -218,7 +218,7 @@ public:
      * @return 是否成功
      */
     bool copyTextureToPixelBuffer(
-        std::shared_ptr<lrengine::render::LRTexture> texture,
+        std::shared_ptr<lrengine::render::LRPlanarTexture> texture,
         CVPixelBufferRef pixelBuffer);
     
     /**
@@ -356,7 +356,7 @@ public:
     /**
      * @brief 从CVPixelBuffer创建LRTexture
      */
-    std::shared_ptr<lrengine::render::LRTexture> createTextureFromPixelBuffer(
+    std::shared_ptr<lrengine::render::LRPlanarTexture> createTextureFromPixelBuffer(
         CVPixelBufferRef pixelBuffer,
         lrengine::render::LRRenderContext* renderContext);
     
@@ -364,7 +364,7 @@ public:
      * @brief 将LRTexture复制到CVPixelBuffer
      */
     bool copyTextureToPixelBuffer(
-        std::shared_ptr<lrengine::render::LRTexture> texture,
+        std::shared_ptr<lrengine::render::LRPlanarTexture> texture,
         CVPixelBufferRef pixelBuffer);
 #endif
     

@@ -185,7 +185,7 @@ std::shared_ptr<lrengine::render::LRTexture> PlatformContext::createTextureFromO
 
 #if defined(PIPELINE_PLATFORM_IOS) || defined(PIPELINE_PLATFORM_MACOS)
 
-std::shared_ptr<lrengine::render::LRTexture> PlatformContext::createTextureFromPixelBuffer(
+std::shared_ptr<lrengine::render::LRPlanarTexture> PlatformContext::createTextureFromPixelBuffer(
     CVPixelBufferRef pixelBuffer,
     lrengine::render::LRRenderContext* renderContext) {
     
@@ -198,7 +198,7 @@ std::shared_ptr<lrengine::render::LRTexture> PlatformContext::createTextureFromP
 }
 
 bool PlatformContext::copyTextureToPixelBuffer(
-    std::shared_ptr<lrengine::render::LRTexture> texture,
+    std::shared_ptr<lrengine::render::LRPlanarTexture> texture,
     CVPixelBufferRef pixelBuffer) {
     
     if (!mIOSMetalManager) {

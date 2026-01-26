@@ -10,6 +10,8 @@
 #import <Metal/Metal.h>
 #import <CoreVideo/CVMetalTextureCache.h>
 
+#include "lrengine/core/LRPlanarTexture.h"
+#include "pipeline/utils/PipelineLog.h"
 // libyuv for format conversion
 #include "libyuv.h"
 
@@ -62,12 +64,7 @@ bool PixelBufferInputStrategy::processToGPU(const InputData& input,
     }
     
     // 创建 Metal 纹理
-    if (!createMetalTextureFromPixelBuffer(mCurrentPixelBuffer)) {
-        return false;
-    }
-    
-    outputTexture = mOutputTexture;
-    return true;
+    return createMetalTextureFromPixelBuffer(mCurrentPixelBuffer);
 }
 
 bool PixelBufferInputStrategy::processToCPU(const InputData& input,
@@ -107,6 +104,7 @@ void PixelBufferInputStrategy::setMetalContextManager(IOSMetalContextManager* ma
 
 bool PixelBufferInputStrategy::submitPixelBuffer(CVPixelBufferRef pixelBuffer, int64_t timestamp) {
     if (!pixelBuffer) {
+        PIPELINE_LOGE("Invalid pixel buffer");
         return false;
     }
     
