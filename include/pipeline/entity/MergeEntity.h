@@ -139,21 +139,37 @@ public:
      * @brief 获取已合并帧数
      */
     uint64_t getMergedFrameCount() const { return mMergedFrameCount; }
-    
+        
     /**
-     * @brief 获取 GPU 帧数
+     * @brief 获取GPU帧数
      */
     uint64_t getGPUFrameCount() const { return mGPUFrameCount; }
-    
+        
     /**
-     * @brief 获取 CPU 帧数
+     * @brief 获取CPU帧数
      */
     uint64_t getCPUFrameCount() const { return mCPUFrameCount; }
-    
+        
     /**
      * @brief 获取丢弃帧数
      */
     uint64_t getDroppedFrameCount() const { return mDroppedFrameCount; }
+        
+    // ==========================================================================
+    // 异步任务链接口 (新增)
+    // ==========================================================================
+        
+    /**
+     * @brief 设置PipelineExecutor引用
+     */
+    void setExecutor(class PipelineExecutor* executor) { mExecutor = executor; }
+        
+    /**
+     * @brief 获取Synchronizer
+     * 
+     * 用于上游Entity直接推送数据到同步器。
+     */
+    input::FrameSynchronizer* getSynchronizer() { return mSynchronizer.get(); }
     
 protected:
     // ==========================================================================
@@ -194,11 +210,6 @@ private:
     // 回调
     MergeCallback mMergeCallback;
     
-    // 当前帧数据
-    FramePacketPtr mCurrentGPUPacket;
-    FramePacketPtr mCurrentCPUPacket;
-    int64_t mCurrentTimestamp = 0;
-    
     // 统计
     uint64_t mMergedFrameCount = 0;
     uint64_t mGPUFrameCount = 0;
@@ -207,6 +218,13 @@ private:
     
     // 线程安全
     mutable std::mutex mMergeMutex;
+    
+    // ==========================================================================
+    // 异步任务链数据 (新增)
+    // ==========================================================================
+    
+    // PipelineExecutor 引用 (用于投递下游任务)
+    class PipelineExecutor* mExecutor = nullptr;
 };
 
 using MergeEntityPtr = std::shared_ptr<MergeEntity>;

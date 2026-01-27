@@ -13,6 +13,8 @@
 #include "pipeline/input/InputFormat.h"
 #include <memory>
 #include <functional>
+#include <queue>
+#include <condition_variable>
 
 // 前向声明 LREngine 类型
 namespace lrengine {
@@ -244,10 +246,41 @@ public:
     
     /**
      * @brief 提交双路数据
-     * @param data 包含 CPU 和 GPU 的输入数据
+     * @param data 包含CPU和GPU的输入数据
      * @return 是否成功
      */
     bool submitData(const InputData& data);
+        
+    // ==========================================================================
+    // 异步任务链接口 (新增)
+    // ==========================================================================
+        
+    /**
+     * @brief 设置PipelineExecutor引用
+     * 
+     * 用于在处理完成后投递下游任务。
+     * 
+     * @param executor PipelineExecutor指针
+     */
+    void setExecutor(class PipelineExecutor* executor) { mExecutor = executor; }
+        
+    /**
+     * @brief 启动处理循环
+     * 
+     * 将InputEntity的process任务投递到TaskQueue，
+     * 进入等待数据状态。
+     */
+    void startProcessingLoop();
+        
+    /**
+     * @brief 停止处理循环
+     */
+    void stopProcessingLoop();
+        
+    /**
+     * @brief 检查是否正在等待数据
+     */
+    bool isWaitingForData() const { return mWaitingForData.load(); }
     
     // ==========================================================================
     // 便捷提交方法
@@ -299,11 +332,6 @@ public:
     // ==========================================================================
     
     /**
-     * @brief 获取当前帧时间戳
-     */
-    int64_t getCurrentTimestamp() const { return mCurrentTimestamp; }
-    
-    /**
      * @brief 获取已处理帧数
      */
     uint64_t getFrameCount() const { return mFrameCount; }
@@ -339,8 +367,8 @@ private:
     bool processInputData(const InputData& data);
     
     // 创建输出数据包
-    FramePacketPtr createGPUOutputPacket();
-    FramePacketPtr createCPUOutputPacket();
+    FramePacketPtr createGPUOutputPacket(int64_t timestamp);
+    FramePacketPtr createCPUOutputPacket(int64_t timestamp);
     
     // 格式转换（使用 libyuv）
     bool convertToRGBA(const CPUInputData& input, uint8_t* output);
@@ -357,9 +385,7 @@ private:
     // 输入策略
     InputStrategyPtr mStrategy;
     
-    // 当前帧数据
-    InputData mCurrentInput;
-    int64_t mCurrentTimestamp = 0;
+    // 帧计数
     uint64_t mFrameCount = 0;
     
     // GPU 输出纹理
@@ -368,9 +394,25 @@ private:
     // CPU 输出缓冲区
     std::vector<uint8_t> mCPUOutputBuffer;
     
-    // 线程安全
-    mutable std::mutex mInputMutex;
-    std::atomic<bool> mHasPendingInput{false};
+    // ==========================================================================
+    // 异步任务链数据 (新增)
+    // ==========================================================================
+    
+    // 输入数据队列 (线程安全)
+    std::queue<InputData> mInputQueue;
+    std::mutex mQueueMutex;
+    std::condition_variable mDataAvailableCV;
+    
+    // 任务控制
+    std::atomic<bool> mTaskRunning{false};       // 任务是否在运行
+    std::atomic<bool> mWaitingForData{false};    // 是否等待数据
+    
+    // PipelineExecutor 引用 (用于投递下游任务)
+    class PipelineExecutor* mExecutor = nullptr;
+    
+    // 队列配置
+    size_t mMaxQueueSize = 3;                    // 最大队列长度
+    bool mDropOldestOnFull = true;               // 队列满时是否丢弃最旧帧
 };
 
 using InputEntityPtr = std::shared_ptr<InputEntity>;

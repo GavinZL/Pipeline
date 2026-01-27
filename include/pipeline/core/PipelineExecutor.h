@@ -10,6 +10,7 @@
 #include <memory>
 #include <atomic>
 #include <functional>
+#include <set>
 
 // 前向声明TaskQueue类型
 namespace task {
@@ -199,6 +200,60 @@ public:
     void setFrameDroppedCallback(std::function<void(FramePacketPtr)> callback);
     void setErrorCallback(std::function<void(EntityId, const std::string&)> callback);
     
+    // ==========================================================================
+    // 异步任务链接口 (新增)
+    // ==========================================================================
+    
+    /**
+     * @brief 提交Entity任务到队列
+     * 
+     * 核心接口：将Entity的process任务投递到对应的TaskQueue。
+     * 这是异步任务链的起点。
+     * 
+     * @param entityId Entity ID
+     * @param contextData 上下文数据（可选，用于传递帧信息）
+     * @return 是否成功提交
+     */
+    bool submitEntityTask(EntityId entityId, 
+                          std::shared_ptr<void> contextData = nullptr);
+    
+    /**
+     * @brief 提交下游任务
+     * 
+     * Entity完成后调用，自动查找并投递所有下游Entity的任务。
+     * 实现任务链式传播。
+     * 
+     * @param entityId 当前完成的Entity ID
+     */
+    void submitDownstreamTasks(EntityId entityId);
+    
+    /**
+     * @brief 检查Pipeline是否完成
+     * 
+     * 检查是否所有Entity都已完成，用于判断是否应该重启循环。
+     * 
+     * @param entityId 当前完成的Entity ID
+     * @return 是否整个Pipeline已完成
+     */
+    bool isPipelineCompleted(EntityId entityId);
+    
+    /**
+     * @brief 重启Pipeline循环
+     * 
+     * Pipeline完成后自动调用，重新投递InputEntity任务。
+     * 实现自动循环机制。
+     */
+    void restartPipelineLoop();
+    
+    /**
+     * @brief 设置InputEntity ID
+     * 
+     * 用于重启循环时知道从哪个Entity开始。
+     * 
+     * @param entityId InputEntity的ID
+     */
+    void setInputEntityId(EntityId entityId) { mInputEntityId = entityId; }
+    
 private:
     // 配置
     ExecutorConfig mConfig;
@@ -233,6 +288,29 @@ private:
     std::vector<std::vector<EntityId>> mExecutionLevels;
     
     // ==========================================================================
+    // 异步任务链状态 (新增)
+    // ==========================================================================
+    
+    /**
+     * @brief 帧执行状态
+     * 
+     * 跟踪当前帧的执行状态，记录哪些Entity已完成。
+     */
+    struct FrameExecutionState {
+        std::set<EntityId> completedEntities;  // 已完成的Entity
+        std::mutex mutex;                       // 状态锁
+        uint64_t frameId = 0;                   // 帧ID
+        int64_t timestamp = 0;                  // 时间戳
+    };
+    
+    // 当前帧执行状态
+    std::shared_ptr<FrameExecutionState> mCurrentFrameState;
+    std::mutex mFrameStateMutex;
+    
+    // InputEntity ID（用于重启循环）
+    EntityId mInputEntityId = InvalidEntityId;
+    
+    // ==========================================================================
     // 内部方法
     // ==========================================================================
     
@@ -262,6 +340,26 @@ private:
      * @brief 获取Entity对应的任务队列
      */
     std::shared_ptr<task::TaskQueue> getQueueForEntity(EntityId entityId) const;
+    
+    /**
+     * @brief 执行单个Entity任务（内部方法）
+     * 
+     * 在submitEntityTask中被调用，执行Entity的process逻辑。
+     * 
+     * @param entityId Entity ID
+     * @param contextData 上下文数据
+     */
+    void executeEntityTask(EntityId entityId, std::shared_ptr<void> contextData);
+    
+    /**
+     * @brief 检查所有依赖是否就绪
+     * 
+     * 检查Entity的所有上游是否已完成。
+     * 
+     * @param entityId Entity ID
+     * @return 是否所有依赖就绪
+     */
+    bool areAllDependenciesReady(EntityId entityId);
     
     /**
      * @brief 处理Entity执行完成

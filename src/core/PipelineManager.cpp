@@ -10,6 +10,7 @@
 #include "pipeline/output/DisplaySurface.h"
 #include "pipeline/input/InputEntity.h"
 #include "pipeline/entity/GPUEntity.h"
+#include "pipeline/entity/MergeEntity.h"
 #include "pipeline/platform/PlatformContext.h"
 #include "pipeline/utils/PipelineLog.h"
 
@@ -138,7 +139,36 @@ bool PipelineManager::start() {
         return false;
     }
     
+    // 🔥 异步任务链: 启动InputEntity的processing loop
+    auto inputEntity = getInputEntity();
+    if (inputEntity) {
+        inputEntity->setExecutor(mExecutor.get());
+        inputEntity->startProcessingLoop();
+        
+        // 设置PipelineExecutor的InputEntity ID
+        if (mExecutor) {
+            mExecutor->setInputEntityId(inputEntity->getId());
+        }
+        
+        PIPELINE_LOGI("Started InputEntity processing loop, entityId: %d", inputEntity->getId());
+    } else {
+        PIPELINE_LOGW("No InputEntity found, pipeline may not receive input data");
+    }
+    
+    // 🔥 设置所有Entity的Executor引用
+    auto allEntities = mGraph->getAllEntities();
+    for (auto& entity : allEntities) {
+        if (entity->getType() == EntityType::Composite) {
+            // MergeEntity需要Executor引用
+            auto mergeEntity = std::dynamic_pointer_cast<MergeEntity>(entity);
+            if (mergeEntity) {
+                mergeEntity->setExecutor(mExecutor.get());
+            }
+        }
+    }
+    
     setState(PipelineState::Running);
+    PIPELINE_LOGI("PipelineManager started successfully");
     return true;
 }
 
@@ -156,11 +186,20 @@ void PipelineManager::resume() {
 
 void PipelineManager::stop() {
     if (mState == PipelineState::Running || mState == PipelineState::Paused) {
+        // 🔥 异步任务链: 停止InputEntity的processing loop
+        auto inputEntity = getInputEntity();
+        if (inputEntity) {
+            inputEntity->stopProcessingLoop();
+            PIPELINE_LOGI("Stopped InputEntity processing loop, entityId: %d", inputEntity->getId());
+        }
+        
         // 等待所有帧完成
         if (mExecutor) {
             mExecutor->flush(3000);
         }
+        
         setState(PipelineState::Stopped);
+        PIPELINE_LOGI("PipelineManager stopped");
     }
 }
 
@@ -290,26 +329,26 @@ ValidationResult PipelineManager::validate() const {
 // =============================================================================
 
 FramePacketPtr PipelineManager::processFrame(FramePacketPtr input) {
-    if (mState != PipelineState::Running || !mExecutor || !input) {
-        PIPELINE_LOGE("PipelineManager is not in Running state or executor is null or input is null");
-        return nullptr;
-    }
+    // 🔥 异步任务链架构: processFrame已废弃
+    // 请使用 InputEntity::submitData() 直接提交数据
+    // 或者使用 processFrameAsync() 并设置回调
     
-    mExecutor->processFrame(input);
+    PIPELINE_LOGW("processFrame is deprecated in async task-driven architecture");
+    PIPELINE_LOGW("Use InputEntity::submitData() or processFrameAsync() with callback instead");
     
-
-    ///todo 处理输出, 返回输出数据包
-    return input;
+    return nullptr;
 }
 
 bool PipelineManager::processFrameAsync(FramePacketPtr input,
                                         std::function<void(FramePacketPtr)> callback) {
-    if (mState != PipelineState::Running || !mExecutor || !input) {
-        PIPELINE_LOGE("PipelineManager is not in Running state or executor is null or input is null");
-        return false;
-    }
+    // 🔥 异步任务链架构: processFrameAsync已废弃
+    // 请使用 InputEntity::submitData() 直接提交数据
+    // 并通过 setFrameCompleteCallback() 设置回调
     
-    return mExecutor->processFrameAsync(input, callback);
+    PIPELINE_LOGW("processFrameAsync is deprecated in async task-driven architecture");
+    PIPELINE_LOGW("Use InputEntity::submitData() and setFrameCompleteCallback() instead");
+    
+    return false;
 }
 
 bool PipelineManager::flush(int64_t timeoutMs) {

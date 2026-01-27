@@ -217,6 +217,28 @@ public:
      */
     size_t getOutDegree(EntityId entityId) const;
     
+    /**
+     * @brief 获取指定Entity的所有下游Entity
+     * 
+     * 通过遍历输出端口的连接关系，查找所有直接下游Entity。
+     * 用于异步任务链调度时确定下游任务投递目标。
+     * 
+     * @param entityId Entity ID
+     * @return 下游Entity ID列表（去重）
+     */
+    std::vector<EntityId> getDownstreamEntities(EntityId entityId) const;
+    
+    /**
+     * @brief 获取指定Entity的所有上游Entity
+     * 
+     * 通过遍历输入端口的连接关系，查找所有直接上游Entity。
+     * 用于异步任务链调度时检查依赖是否满足。
+     * 
+     * @param entityId Entity ID
+     * @return 上游Entity ID列表（去重）
+     */
+    std::vector<EntityId> getUpstreamEntities(EntityId entityId) const;
+    
     // ==========================================================================
     // 图操作
     // ==========================================================================

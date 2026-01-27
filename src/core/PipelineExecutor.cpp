@@ -57,6 +57,13 @@ bool PipelineExecutor::initialize() {
     // 更新执行计划
     updateExecutionPlan();
     
+    // 🔥 新增: 初始化帧状态
+    {
+        std::lock_guard<std::mutex> lock(mFrameStateMutex);
+        mCurrentFrameState = std::make_shared<FrameExecutionState>();
+        mCurrentFrameState->frameId = 0;
+    }
+    
     mInitialized.store(true);
     mRunning.store(true);
     PIPELINE_LOGI("PipelineExecutor initialized");
@@ -400,6 +407,194 @@ bool PipelineExecutor::shouldSkipFrame() const {
     }
     
     return mPendingFrames.load() >= mConfig.maxPendingFrames;
+}
+
+// =============================================================================
+// 异步任务链实现 (新增)
+// =============================================================================
+
+bool PipelineExecutor::submitEntityTask(EntityId entityId, 
+                                        std::shared_ptr<void> contextData) {
+    if (!mRunning.load()) {
+        PIPELINE_LOGW("PipelineExecutor is not running");
+        return false;
+    }
+    
+    auto entity = mGraph->getEntity(entityId);
+    if (!entity || !entity->isEnabled()) {
+        PIPELINE_LOGW("Entity %llu not found or disabled", entityId);
+        return false;
+    }
+    
+    // 获取对应的任务队列
+    auto queue = getQueueForEntity(entityId);
+    if (!queue) {
+        PIPELINE_LOGE("No queue found for entity %llu", entityId);
+        return false;
+    }
+    
+    // 🔥 关键: 创建任务并投递到队列
+    auto taskOp = std::make_shared<task::TaskOperator>(
+        [this, entityId, contextData](const std::shared_ptr<task::TaskOperator>&) {
+            this->executeEntityTask(entityId, contextData);
+        }
+    );
+    
+    queue->async(taskOp);
+    PIPELINE_LOGD("Submitted task for entity %llu to queue", entityId);
+    return true;
+}
+
+void PipelineExecutor::executeEntityTask(EntityId entityId, 
+                                         std::shared_ptr<void> contextData) {
+    auto entity = mGraph->getEntity(entityId);
+    if (!entity) {
+        PIPELINE_LOGW("Entity %llu not found in executeEntityTask", entityId);
+        return;
+    }
+    
+    PIPELINE_LOGD("Executing entity %llu (%s)", entityId, entity->getName().c_str());
+    
+    // 执行Entity
+    bool success = entity->execute(*mContext);
+    
+    if (!success) {
+        // 🔥 特殊处理: 如果是MergeEntity且返回false
+        // 说明正在等待其他路,不算错误
+        if (entity->getType() == EntityType::Composite) {
+            PIPELINE_LOGD("MergeEntity %llu waiting for other paths", entityId);
+            return;  // 不投递下游任务,等待下次被触发
+        }
+        
+        PIPELINE_LOGE("Entity %llu execution failed", entityId);
+        onEntityError(entityId, "Entity execution failed");
+        return;
+    }
+    
+    // 🔥 关键: 记录完成状态
+    {
+        std::lock_guard<std::mutex> lock(mFrameStateMutex);
+        if (mCurrentFrameState) {
+            std::lock_guard<std::mutex> stateLock(mCurrentFrameState->mutex);
+            mCurrentFrameState->completedEntities.insert(entityId);
+            PIPELINE_LOGD("Entity %llu completed, total completed: %zu", 
+                         entityId, mCurrentFrameState->completedEntities.size());
+        }
+    }
+    
+    // 🔥 关键: 投递下游任务
+    submitDownstreamTasks(entityId);
+    
+    // 🔥 关键: 检查是否Pipeline完成
+    if (isPipelineCompleted(entityId)) {
+        PIPELINE_LOGI("Pipeline completed for frame");
+        onFrameComplete(nullptr);  // TODO: 构造FramePacket传递给回调
+        restartPipelineLoop();
+    }
+}
+
+void PipelineExecutor::submitDownstreamTasks(EntityId entityId) {
+    auto downstreams = mGraph->getDownstreamEntities(entityId);
+    
+    PIPELINE_LOGD("Entity %llu has %zu downstream entities", entityId, downstreams.size());
+    
+    for (EntityId downstreamId : downstreams) {
+        auto downstream = mGraph->getEntity(downstreamId);
+        if (!downstream) {
+            continue;
+        }
+        
+        // 🔥 特殊处理: 如果下游是MergeEntity
+        if (downstream->getType() == EntityType::Composite) {
+            // 检查是否所有上游都已完成
+            if (!areAllDependenciesReady(downstreamId)) {
+                PIPELINE_LOGD("MergeEntity %llu dependencies not ready, skipping", downstreamId);
+                continue;  // 上游未全部完成,不投递
+            }
+        }
+        
+        // 检查依赖
+        if (areAllDependenciesReady(downstreamId)) {
+            PIPELINE_LOGD("Submitting downstream task for entity %llu", downstreamId);
+            submitEntityTask(downstreamId);
+        } else {
+            PIPELINE_LOGD("Entity %llu dependencies not ready", downstreamId);
+        }
+    }
+}
+
+bool PipelineExecutor::areAllDependenciesReady(EntityId entityId) {
+    auto upstreams = mGraph->getUpstreamEntities(entityId);
+    
+    std::lock_guard<std::mutex> lock(mFrameStateMutex);
+    if (!mCurrentFrameState) {
+        return false;
+    }
+    
+    std::lock_guard<std::mutex> stateLock(mCurrentFrameState->mutex);
+    for (EntityId upstreamId : upstreams) {
+        if (mCurrentFrameState->completedEntities.find(upstreamId) == 
+            mCurrentFrameState->completedEntities.end()) {
+            return false;  // 有上游未完成
+        }
+    }
+    return true;
+}
+
+bool PipelineExecutor::isPipelineCompleted(EntityId entityId) {
+    // 检查是否是sink entity（没有下游）
+    auto downstreams = mGraph->getDownstreamEntities(entityId);
+    if (!downstreams.empty()) {
+        return false;  // 还有下游,未完成
+    }
+    
+    // 检查所有Entity是否都已完成
+    std::lock_guard<std::mutex> lock(mFrameStateMutex);
+    if (!mCurrentFrameState) {
+        return false;
+    }
+    
+    auto allEntities = mGraph->getAllEntities();
+    std::lock_guard<std::mutex> stateLock(mCurrentFrameState->mutex);
+    
+    for (auto& entity : allEntities) {
+        EntityId id = entity->getId();
+        if (entity->isEnabled() && 
+            mCurrentFrameState->completedEntities.find(id) == 
+            mCurrentFrameState->completedEntities.end()) {
+            return false;  // 有Entity未完成
+        }
+    }
+    
+    return true;
+}
+
+void PipelineExecutor::restartPipelineLoop() {
+    PIPELINE_LOGI("Restarting pipeline loop");
+    
+    // 触发完成回调
+    // TODO: 构造FramePacket传递给回调
+    
+    // 更新统计
+    {
+        std::lock_guard<std::mutex> lock(mStatsMutex);
+        mStats.totalFrames++;
+    }
+    
+    // 🔥 关键: 创建新的帧状态
+    {
+        std::lock_guard<std::mutex> lock(mFrameStateMutex);
+        mCurrentFrameState = std::make_shared<FrameExecutionState>();
+        mCurrentFrameState->frameId = mStats.totalFrames;
+    }
+    
+    // 🔥 关键: 重新投递InputEntity任务
+    if (mInputEntityId != InvalidEntityId) {
+        PIPELINE_LOGD("Resubmitting InputEntity %llu", mInputEntityId);
+        submitEntityTask(mInputEntityId);
+    } else {
+        PIPELINE_LOGW("InputEntity ID not set, cannot restart loop");
+    }
 }
 
 } // namespace pipeline

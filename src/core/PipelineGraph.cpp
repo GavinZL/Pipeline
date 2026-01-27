@@ -568,6 +568,67 @@ size_t PipelineGraph::getOutDegree(EntityId entityId) const {
     return 0;
 }
 
+std::vector<EntityId> PipelineGraph::getDownstreamEntities(EntityId entityId) const {
+    std::vector<EntityId> result;
+    
+    auto entity = getEntity(entityId);
+    if (!entity) {
+        PIPELINE_LOGW("Entity with ID %llu does not exist", entityId);
+        return result;
+    }
+    
+    // 遍历所有输出端口
+    for (size_t i = 0; i < entity->getOutputPortCount(); ++i) {
+        auto port = entity->getOutputPort(i);
+        if (!port) continue;
+        
+        // 获取连接的下游端口
+        auto connections = port->getConnections();
+        for (auto* inputPort : connections) {
+            if (inputPort) {
+                EntityId downstreamId = inputPort->getOwnerId();
+                if (downstreamId != InvalidEntityId) {
+                    // 去重
+                    if (std::find(result.begin(), result.end(), downstreamId) == result.end()) {
+                        result.push_back(downstreamId);
+                    }
+                }
+            }
+        }
+    }
+    
+    PIPELINE_LOGD("Entity %llu has %zu downstream entities", entityId, result.size());
+    return result;
+}
+
+std::vector<EntityId> PipelineGraph::getUpstreamEntities(EntityId entityId) const {
+    std::vector<EntityId> result;
+    
+    auto entity = getEntity(entityId);
+    if (!entity) {
+        PIPELINE_LOGW("Entity with ID %llu does not exist", entityId);
+        return result;
+    }
+    
+    // 遍历所有输入端口
+    for (size_t i = 0; i < entity->getInputPortCount(); ++i) {
+        auto port = entity->getInputPort(i);
+        if (!port || !port->isConnected()) continue;
+        
+        // 获取连接的上游Entity ID
+        EntityId upstreamId = port->getSourceEntityId();
+        if (upstreamId != InvalidEntityId) {
+            // 去重
+            if (std::find(result.begin(), result.end(), upstreamId) == result.end()) {
+                result.push_back(upstreamId);
+            }
+        }
+    }
+    
+    PIPELINE_LOGD("Entity %llu has %zu upstream entities", entityId, result.size());
+    return result;
+}
+
 // =============================================================================
 // 图操作
 // =============================================================================

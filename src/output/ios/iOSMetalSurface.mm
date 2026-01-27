@@ -475,6 +475,15 @@ void iOSMetalSurface::cleanupResources() {
 }
 
 } // namespace ios
+
+// =============================================================================
+// 平台工厂函数
+// =============================================================================
+
+DisplaySurfacePtr createPlatformDisplaySurface() {
+    return std::make_shared<ios::iOSMetalSurface>();
+}
+
 } // namespace output
 } // namespace pipeline
 

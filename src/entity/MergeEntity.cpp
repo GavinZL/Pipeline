@@ -98,57 +98,51 @@ bool MergeEntity::prepare(PipelineContext& context) {
 bool MergeEntity::process(const std::vector<FramePacketPtr>& inputs,
                           std::vector<FramePacketPtr>& outputs,
                           PipelineContext& context) {
-    // 从输入端口获取数据
-    auto* gpuPort = getInputPort(MERGE_GPU_INPUT_PORT);
-    auto* cpuPort = getInputPort(MERGE_CPU_INPUT_PORT);
+    // 🔥 关键设计: MergeEntity不直接等待
+    // 而是检查FrameSynchronizer是否有已同步的帧
     
-    if (gpuPort && gpuPort->isReady()) {
-        auto gpuPacket = gpuPort->getPacket();
-        if (gpuPacket) {
-            processGPUInput(gpuPacket);
-        }
+    if (!mSynchronizer) {
+        return false;
     }
     
-    if (cpuPort && cpuPort->isReady()) {
-        auto cpuPacket = cpuPort->getPacket();
-        if (cpuPacket) {
-            processCPUInput(cpuPacket);
-        }
-    }
-    
-    // 尝试获取同步后的帧
+    // 尝试获取已同步的帧 (非阻塞)
     auto syncedFrame = mSynchronizer->tryGetSyncedFrame();
-    if (syncedFrame) {
-        MergedFrame merged;
-        merged.gpuResult = syncedFrame->gpuFrame;
-        merged.cpuResult = syncedFrame->cpuFrame;
-        merged.timestamp = syncedFrame->timestamp;
-        merged.hasGPU = syncedFrame->hasGPU;
-        merged.hasCPU = syncedFrame->hasCPU;
-        
-        // 创建合并后的输出包
-        auto outputPacket = createMergedPacket(merged);
-        if (outputPacket) {
-            outputs.push_back(outputPacket);
-            
-            // 设置到输出端口
-            auto* outPort = getOutputPort(MERGE_OUTPUT_PORT);
-            if (outPort) {
-                outPort->setPacket(outputPacket);
-            }
-        }
-        
-        // 触发回调
-        if (mMergeCallback) {
-            auto mergedPtr = std::make_shared<MergedFrame>(merged);
-            mMergeCallback(mergedPtr);
-        }
-        
-        ++mMergedFrameCount;
-        return true;
+    
+    if (!syncedFrame) {
+        // 没有已同步的帧,说明还在等待其他路
+        // 🔥 关键: 返回false,不生成输出
+        // PipelineExecutor会知道此Entity未完成,不投递下游任务
+        return false;
     }
     
-    return false;
+    // 有已同步的帧,创建合并输出
+    MergedFrame merged;
+    merged.gpuResult = syncedFrame->gpuFrame;
+    merged.cpuResult = syncedFrame->cpuFrame;
+    merged.timestamp = syncedFrame->timestamp;
+    merged.hasGPU = syncedFrame->hasGPU;
+    merged.hasCPU = syncedFrame->hasCPU;
+    
+    // 创建合并后的输出包
+    auto outputPacket = createMergedPacket(merged);
+    if (outputPacket) {
+        outputs.push_back(outputPacket);
+        
+        // 设置到输出端口
+        auto* outPort = getOutputPort(MERGE_OUTPUT_PORT);
+        if (outPort) {
+            outPort->setPacket(outputPacket);
+        }
+    }
+    
+    // 触发回调
+    if (mMergeCallback) {
+        auto mergedPtr = std::make_shared<MergedFrame>(merged);
+        mMergeCallback(mergedPtr);
+    }
+    
+    ++mMergedFrameCount;
+    return true;
 }
 
 void MergeEntity::finalize(PipelineContext& context) {
@@ -157,10 +151,8 @@ void MergeEntity::finalize(PipelineContext& context) {
 
 void MergeEntity::resetForNextFrame() {
     ProcessEntity::resetForNextFrame();
-    
-    std::lock_guard<std::mutex> lock(mMergeMutex);
-    mCurrentGPUPacket.reset();
-    mCurrentCPUPacket.reset();
+    // 异步任务链架构: 不需要重置临时存储
+    // FrameSynchronizer自动管理帧数据
 }
 
 // =============================================================================
@@ -168,6 +160,9 @@ void MergeEntity::resetForNextFrame() {
 // =============================================================================
 
 void MergeEntity::processGPUInput(FramePacketPtr packet) {
+    // 🔥 异步任务链架构: 此方法已废弃
+    // 上游Entity应直接调用 getSynchronizer()->pushGPUFrame()
+    
     if (!packet || !mSynchronizer) {
         return;
     }
@@ -176,12 +171,12 @@ void MergeEntity::processGPUInput(FramePacketPtr packet) {
     
     int64_t timestamp = packet->getTimestamp();
     mSynchronizer->pushGPUFrame(packet, timestamp);
-    
-    std::lock_guard<std::mutex> lock(mMergeMutex);
-    mCurrentGPUPacket = packet;
 }
 
 void MergeEntity::processCPUInput(FramePacketPtr packet) {
+    // 🔥 异步任务链架构: 此方法已废弃
+    // 上游Entity应直接调用 getSynchronizer()->pushCPUFrame()
+    
     if (!packet || !mSynchronizer) {
         return;
     }
@@ -190,9 +185,6 @@ void MergeEntity::processCPUInput(FramePacketPtr packet) {
     
     int64_t timestamp = packet->getTimestamp();
     mSynchronizer->pushCPUFrame(packet, timestamp);
-    
-    std::lock_guard<std::mutex> lock(mMergeMutex);
-    mCurrentCPUPacket = packet;
 }
 
 FramePacketPtr MergeEntity::createMergedPacket(const MergedFrame& frame) {

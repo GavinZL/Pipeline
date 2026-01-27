@@ -156,7 +156,6 @@ bool ProcessEntity::execute(PipelineContext& context) {
     // 检查是否启用
     if (!mEnabled.load()) {
         setState(EntityState::Completed);
-        sendOutputs();
         return true;
     }
     
@@ -166,11 +165,11 @@ bool ProcessEntity::execute(PipelineContext& context) {
         return false;
     }
     
-    // 等待输入就绪
-    setState(EntityState::Blocked);
-    if (!waitInputsReady(-1)) {
-        setError("Timeout waiting for inputs");
-        return false;
+    // 🔥 异步任务链兼容: 不阻塞等待输入
+    // InputPort的数据应该在上游Entity完成时已经ready
+    if (!areInputsReady()) {
+        setState(EntityState::Blocked);
+        return false;  // 输入未就绪，返回false
     }
     
     // 准备阶段
@@ -184,9 +183,11 @@ bool ProcessEntity::execute(PipelineContext& context) {
     setState(EntityState::Processing);
     auto startTime = std::chrono::high_resolution_clock::now();
     
+    // 🔥 Step 1: 从InputPort收集输入
     auto inputs = collectInputs();
     std::vector<FramePacketPtr> outputs;
     
+    // 🔥 Step 2: 调用子类的process
     bool success = process(inputs, outputs, context);
     
     auto endTime = std::chrono::high_resolution_clock::now();
@@ -203,16 +204,18 @@ bool ProcessEntity::execute(PipelineContext& context) {
         return false;
     }
     
-    // 设置输出
-    std::lock_guard<std::mutex> lock(mPortsMutex);
-    for (size_t i = 0; i < outputs.size() && i < mOutputPorts.size(); ++i) {
-        mOutputPorts[i]->setPacket(outputs[i]);
+    // 🔥 Step 3: 将输出写入OutputPort
+    {
+        std::lock_guard<std::mutex> lock(mPortsMutex);
+        for (size_t i = 0; i < outputs.size() && i < mOutputPorts.size(); ++i) {
+            mOutputPorts[i]->setPacket(outputs[i]);
+        }
     }
     
     // 完成阶段
     finalize(context);
     
-    // 发送输出
+    // 发送输出到下游InputPort
     sendOutputs();
     
     setState(EntityState::Completed);
