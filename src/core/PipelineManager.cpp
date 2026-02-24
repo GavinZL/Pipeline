@@ -17,6 +17,7 @@
 // 平台特定头文件
 #if defined(__APPLE__)
 #include "pipeline/input/ios/PixelBufferInputStrategy.h"
+#include "pipeline/output/ios/iOSMetalSurface.h"
 #endif
 #if defined(__ANDROID__)
 #include "pipeline/input/android/OESTextureInputStrategy.h"
@@ -408,7 +409,7 @@ void PipelineManager::setOutputEntity(EntityId entityId) {
 // 输出配置(扩展)
 // =============================================================================
 
-int32_t PipelineManager::setupDisplayOutput(void* surface, uint32_t width, uint32_t height) {
+int32_t PipelineManager::setupDisplayOutput(void* surface, uint32_t width, uint32_t height, void* metalManager) {
     if (!surface) {
         PIPELINE_LOGE("Invalid surface");
         return -1;
@@ -427,13 +428,25 @@ int32_t PipelineManager::setupDisplayOutput(void* surface, uint32_t width, uint3
         return -1;
     }
     
-    // 2. 绑定到平台 Surface
 #if defined(__APPLE__)
+    // 2. 设置 Metal 上下文管理器（必须在 initialize 之前）
+    if (metalManager) {
+        auto* metalSurface = dynamic_cast<output::ios::iOSMetalSurface*>(displaySurface.get());
+        if (metalSurface) {
+            metalSurface->setMetalContextManager(static_cast<IOSMetalContextManager*>(metalManager));
+            PIPELINE_LOGD("MetalContextManager set for iOSMetalSurface");
+        }
+    } else {
+        PIPELINE_LOGW("No MetalContextManager provided, iOSMetalSurface may fail to initialize");
+    }
+    
+    // 3. 绑定到平台 Surface
     if (!displaySurface->attachToLayer(surface)) {
         PIPELINE_LOGE("Failed to attach DisplaySurface to layer");
         return -1;
     }
 #elif defined(__ANDROID__)
+    // 2. 绑定到平台 Surface
     if (!displaySurface->attachToWindow(surface)) {
         PIPELINE_LOGE("Failed to attach DisplaySurface to window");
         return -1;
@@ -443,7 +456,7 @@ int32_t PipelineManager::setupDisplayOutput(void* surface, uint32_t width, uint3
     return -1;
 #endif
     
-    // 3. 初始化 DisplaySurface
+    // 4. 初始化 DisplaySurface
     if (!displaySurface->initialize(mRenderContext)) {
         PIPELINE_LOGE("Failed to initialize DisplaySurface");
         return -1;

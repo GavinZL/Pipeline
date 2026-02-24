@@ -250,6 +250,7 @@ bool PipelineFacade::feedPixelBuffer(void* pixelBuffer, uint64_t timestamp) {
     // 使用 InputEntity 提交 PixelBuffer
     input::InputData inputData;
     inputData.dataType = input::InputDataType::PlatformBuffer;
+    inputData.platformBuffer = pixelBuffer;  // 传递平台 buffer
     inputData.cpu.timestamp = static_cast<int64_t>(timestamp);
     inputData.cpu.width = static_cast<uint32_t>(CVPixelBufferGetWidth(buffer));
     inputData.cpu.height = static_cast<uint32_t>(CVPixelBufferGetHeight(buffer));
@@ -285,7 +286,18 @@ int32_t PipelineFacade::setupDisplayOutput(void* surface, int32_t width, int32_t
     uint32_t w = width > 0 ? static_cast<uint32_t>(width) : mConfig.renderWidth;
     uint32_t h = height > 0 ? static_cast<uint32_t>(height) : mConfig.renderHeight;
     
-    int32_t targetId = mPipelineManager->setupDisplayOutput(surface, w, h);
+    // 获取 MetalContextManager（iOS/macOS）
+    void* metalManager = nullptr;
+#if defined(__APPLE__)
+    if (mPlatformContext) {
+        metalManager = mPlatformContext->getIOSMetalManager();
+        if (metalManager) {
+            PIPELINE_LOGD("Passing MetalContextManager to setupDisplayOutput");
+        }
+    }
+#endif
+    
+    int32_t targetId = mPipelineManager->setupDisplayOutput(surface, w, h, metalManager);
     if (targetId < 0) {
         PIPELINE_LOGE("Failed to setup display output");
         if (mCallbacks.onError) {

@@ -57,14 +57,22 @@ bool PixelBufferInputStrategy::processToGPU(const InputData& input,
         return false;
     }
     
-    // 使用当前存储的 PixelBuffer
-    if (!mCurrentPixelBuffer) {
+    CVPixelBufferRef pixelBuffer = nullptr;
+    
+    // 优先使用 platformBuffer
+    if (input.platformBuffer) {
+        pixelBuffer = static_cast<CVPixelBufferRef>(input.platformBuffer);
+    } else if (mCurrentPixelBuffer) {
+        pixelBuffer = mCurrentPixelBuffer;
+    }
+    
+    if (!pixelBuffer) {
         PIPELINE_LOGE("No pixel buffer available");
         return false;
     }
     
     // 创建 Metal 纹理
-    return createMetalTextureFromPixelBuffer(mCurrentPixelBuffer);
+    return createMetalTextureFromPixelBuffer(pixelBuffer);
 }
 
 bool PixelBufferInputStrategy::processToCPU(const InputData& input,
@@ -74,12 +82,21 @@ bool PixelBufferInputStrategy::processToCPU(const InputData& input,
         return false;
     }
     
-    if (!mCurrentPixelBuffer) {
+    CVPixelBufferRef pixelBuffer = nullptr;
+    
+    // 优先使用 platformBuffer
+    if (input.platformBuffer) {
+        pixelBuffer = static_cast<CVPixelBufferRef>(input.platformBuffer);
+    } else if (mCurrentPixelBuffer) {
+        pixelBuffer = mCurrentPixelBuffer;
+    }
+    
+    if (!pixelBuffer) {
         PIPELINE_LOGE("No pixel buffer available");
         return false;
     }
     
-    return readCPUDataFromPixelBuffer(mCurrentPixelBuffer, outputBuffer, outputSize);
+    return readCPUDataFromPixelBuffer(pixelBuffer, outputBuffer, outputSize);
 }
 
 void PixelBufferInputStrategy::release() {

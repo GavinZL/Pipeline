@@ -316,9 +316,10 @@ public:
      * @param surface 平台 Surface (CAMetalLayer/ANativeWindow)
      * @param width 显示宽度
      * @param height 显示高度
+     * @param metalManager Metal 上下文管理器（iOS/macOS 可选）
      * @return 输出目标 ID,失败返回 -1
      */
-    int32_t setupDisplayOutput(void* surface, uint32_t width, uint32_t height);
+    int32_t setupDisplayOutput(void* surface, uint32_t width, uint32_t height, void* metalManager = nullptr);
     
     /**
      * @brief 设置回调输出

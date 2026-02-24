@@ -94,6 +94,9 @@ struct InputData {
     CPUInputData cpu;
     GPUInputData gpu;
     InputDataType dataType = InputDataType::CPUBuffer;
+    
+    // 平台特定 buffer (CVPixelBufferRef / AHardwareBuffer 等)
+    void* platformBuffer = nullptr;
 };
 
 // =============================================================================
