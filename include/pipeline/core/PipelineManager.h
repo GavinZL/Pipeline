@@ -255,6 +255,11 @@ public:
     void setInputEntity(EntityId entityId);
     
     /**
+     * @brief 获取输入Entity ID
+     */
+    EntityId getInputEntityId() const { return mInputEntityId; }
+    
+    /**
      * @brief 设置输出Entity
      */
     void setOutputEntity(EntityId entityId);
@@ -278,7 +283,7 @@ public:
      * @param metalManager Metal 上下文管理器（可选）
      * @return 输入实体 ID
      */
-    EntityId setupPixelBufferInput(uint32_t width, uint32_t height, void* metalManager = nullptr);
+    EntityId setupPixelBufferInput(uint32_t width, uint32_t height, void* metalManager = nullptr, bool enableCPUOutput = false);
 #endif
     
 #if defined(__ANDROID__)
@@ -386,6 +391,11 @@ public:
     PipelineExecutor* getExecutor() const { return mExecutor.get(); }
     
     /**
+     * @brief 获取执行器的 shared_ptr（用于安全回调）
+     */
+    std::shared_ptr<PipelineExecutor> getExecutorSharedPtr() const { return mExecutor; }
+    
+    /**
      * @brief 获取上下文
      */
     std::shared_ptr<PipelineContext> getContext() const;
@@ -470,7 +480,7 @@ private:
     
     // 核心组件
     std::unique_ptr<PipelineGraph> mGraph;
-    std::unique_ptr<PipelineExecutor> mExecutor;
+    std::shared_ptr<PipelineExecutor> mExecutor;  // 🔥 改为 shared_ptr 以支持 enable_shared_from_this
     std::shared_ptr<PipelineContext> mContext;
     
     // 资源池

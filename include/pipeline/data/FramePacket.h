@@ -16,6 +16,7 @@
 namespace lrengine {
 namespace render {
 class LRTexture;
+class LRPlanarTexture;
 class LRFence;
 } // namespace render
 } // namespace lrengine
@@ -92,6 +93,16 @@ public:
      * @brief 设置GPU纹理
      */
     void setTexture(std::shared_ptr<lrengine::render::LRTexture> texture);
+    
+    /**
+     * @brief 获取多平面GPU纹理
+     */
+    std::shared_ptr<lrengine::render::LRPlanarTexture> getPlanarTexture() const { return mPlanarTexture; }
+    
+    /**
+     * @brief 设置多平面GPU纹理
+     */
+    void setPlanarTexture(std::shared_ptr<lrengine::render::LRPlanarTexture> texture);
     
     /**
      * @brief 获取CPU缓冲数据（懒加载）
@@ -283,6 +294,7 @@ private:
     
     // 图像数据
     std::shared_ptr<lrengine::render::LRTexture> mTexture;
+    std::shared_ptr<lrengine::render::LRPlanarTexture> mPlanarTexture;  // 多平面纹理
     std::shared_ptr<uint8_t> mCpuBuffer;  // 使用 uint8_t 而非 uint8_t[] 以简化操作
     size_t mCpuBufferSize = 0;
     uint32_t mWidth = 0;

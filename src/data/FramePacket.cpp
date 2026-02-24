@@ -28,6 +28,13 @@ void FramePacket::setTexture(std::shared_ptr<lrengine::render::LRTexture> textur
     mCpuBufferSize = 0;
 }
 
+void FramePacket::setPlanarTexture(std::shared_ptr<lrengine::render::LRPlanarTexture> texture) {
+    mPlanarTexture = std::move(texture);
+    // 清除CPU缓冲，因为纹理已更新
+    mCpuBuffer.reset();
+    mCpuBufferSize = 0;
+}
+
 const uint8_t* FramePacket::getCpuBuffer() {
     if (!mCpuBuffer && mTexture) {
         loadCpuBufferFromTexture();
@@ -141,6 +148,8 @@ void FramePacket::reset() {
     mSequenceNumber = 0;
     
     // 保留纹理引用但清除CPU缓冲
+    mTexture.reset();
+    mPlanarTexture.reset();
     mCpuBuffer.reset();
     mCpuBufferSize = 0;
     
@@ -162,6 +171,7 @@ FramePacketPtr FramePacket::clone() const {
     
     // 浅拷贝纹理（共享同一个纹理）
     packet->mTexture = mTexture;
+    packet->mPlanarTexture = mPlanarTexture;
     
     packet->mWidth = mWidth;
     packet->mHeight = mHeight;

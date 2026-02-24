@@ -57,7 +57,7 @@ bool PipelineExecutor::initialize() {
     // 更新执行计划
     updateExecutionPlan();
     
-    // 🔥 新增: 初始化帧状态
+    // 初始化帧状态
     {
         std::lock_guard<std::mutex> lock(mFrameStateMutex);
         mCurrentFrameState = std::make_shared<FrameExecutionState>();
@@ -433,10 +433,25 @@ bool PipelineExecutor::submitEntityTask(EntityId entityId,
         return false;
     }
     
-    // 🔥 关键: 创建任务并投递到队列
+    // 使用 weak_ptr 捕获 this，避免悬空指针
+    // 当 PipelineExecutor 被销毁后，weak_ptr 会失效，回调会安全退出
+    auto weakSelf = std::weak_ptr<PipelineExecutor>(shared_from_this());
+    
     auto taskOp = std::make_shared<task::TaskOperator>(
-        [this, entityId, contextData](const std::shared_ptr<task::TaskOperator>&) {
-            this->executeEntityTask(entityId, contextData);
+        [weakSelf, entityId, contextData](const std::shared_ptr<task::TaskOperator>&) {
+            // 尝试获取 shared_ptr
+            auto self = weakSelf.lock();
+            if (!self) {
+                // PipelineExecutor 已被销毁，安全退出
+                return;
+            }
+            
+            // 再次检查运行状态
+            if (!self->mRunning.load()) {
+                return;
+            }
+            
+            self->executeEntityTask(entityId, contextData);
         }
     );
     
@@ -459,7 +474,7 @@ void PipelineExecutor::executeEntityTask(EntityId entityId,
     bool success = entity->execute(*mContext);
     
     if (!success) {
-        // 🔥 特殊处理: 如果是MergeEntity且返回false
+        // 如果是MergeEntity且返回false
         // 说明正在等待其他路,不算错误
         if (entity->getType() == EntityType::Composite) {
             PIPELINE_LOGD("MergeEntity %llu waiting for other paths", entityId);
@@ -471,7 +486,7 @@ void PipelineExecutor::executeEntityTask(EntityId entityId,
         return;
     }
     
-    // 🔥 关键: 记录完成状态
+    // 记录完成状态
     {
         std::lock_guard<std::mutex> lock(mFrameStateMutex);
         if (mCurrentFrameState) {
@@ -482,10 +497,10 @@ void PipelineExecutor::executeEntityTask(EntityId entityId,
         }
     }
     
-    // 🔥 关键: 投递下游任务
+    // 投递下游任务
     submitDownstreamTasks(entityId);
     
-    // 🔥 关键: 检查是否Pipeline完成
+    // 检查是否Pipeline完成
     if (isPipelineCompleted(entityId)) {
         PIPELINE_LOGI("Pipeline completed for frame");
         onFrameComplete(nullptr);  // TODO: 构造FramePacket传递给回调
@@ -504,7 +519,7 @@ void PipelineExecutor::submitDownstreamTasks(EntityId entityId) {
             continue;
         }
         
-        // 🔥 特殊处理: 如果下游是MergeEntity
+        // 如果下游是MergeEntity
         if (downstream->getType() == EntityType::Composite) {
             // 检查是否所有上游都已完成
             if (!areAllDependenciesReady(downstreamId)) {
@@ -572,23 +587,18 @@ bool PipelineExecutor::isPipelineCompleted(EntityId entityId) {
 void PipelineExecutor::restartPipelineLoop() {
     PIPELINE_LOGI("Restarting pipeline loop");
     
-    // 触发完成回调
-    // TODO: 构造FramePacket传递给回调
-    
     // 更新统计
     {
         std::lock_guard<std::mutex> lock(mStatsMutex);
         mStats.totalFrames++;
     }
     
-    // 🔥 关键: 创建新的帧状态
     {
         std::lock_guard<std::mutex> lock(mFrameStateMutex);
         mCurrentFrameState = std::make_shared<FrameExecutionState>();
         mCurrentFrameState->frameId = mStats.totalFrames;
     }
     
-    // 🔥 关键: 重新投递InputEntity任务
     if (mInputEntityId != InvalidEntityId) {
         PIPELINE_LOGD("Resubmitting InputEntity %llu", mInputEntityId);
         submitEntityTask(mInputEntityId);

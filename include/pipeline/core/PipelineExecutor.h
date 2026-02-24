@@ -66,8 +66,10 @@ struct ExecutionStats {
  * - 支持层次并行（同层Entity并行执行）
  * - 使用Consumable管理依赖链
  * - 支持跳帧和背压控制
+ * 
+ * 🔥 线程安全：继承 enable_shared_from_this 以支持异步回调安全访问
  */
-class PipelineExecutor {
+class PipelineExecutor : public std::enable_shared_from_this<PipelineExecutor> {
 public:
     /**
      * @brief 构造函数

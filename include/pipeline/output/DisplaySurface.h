@@ -239,6 +239,11 @@ public:
      */
     bool isVSyncEnabled() const { return mVSyncEnabled; }
     
+    /**
+     * @brief 获取渲染上下文
+     */
+    lrengine::render::LRRenderContext* getRenderContext() const { return mRenderContext; }
+    
 protected:
     SurfaceState mState = SurfaceState::Uninitialized;
     DisplayConfig mDisplayConfig;

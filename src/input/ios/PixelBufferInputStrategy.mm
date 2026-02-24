@@ -15,6 +15,8 @@
 // libyuv for format conversion
 #include "libyuv.h"
 
+#include <vector>
+
 namespace pipeline {
 namespace input {
 namespace ios {
@@ -53,7 +55,36 @@ bool PixelBufferInputStrategy::initialize(lrengine::render::LRRenderContext* con
 
 bool PixelBufferInputStrategy::processToGPU(const InputData& input,
                                              lrengine::LRTexturePtr& outputTexture) {
+    // 旧接口，使用 processToGPUPlanar 并返回第一个平面
+    std::shared_ptr<lrengine::render::LRPlanarTexture> planarTexture;
+    if (!processToGPUPlanar(input, planarTexture)) {
+        return false;
+    }
+    
+    if (!planarTexture) {
+        return false;
+    }
+    
+    // 获取第一个平面纹理
+    auto* planeTexture = planarTexture->GetPlaneTexture(0);
+    if (!planeTexture) {
+        PIPELINE_LOGE("Failed to get first plane texture");
+        return false;
+    }
+    
+    // 创建 shared_ptr（不拥有所有权，因为纹理属于 LRPlanarTexture）
+    // 注意：这里需要小心处理生命周期
+    outputTexture = std::shared_ptr<lrengine::render::LRTexture>(
+        planarTexture, planeTexture  // 别名构造器：共享 planarTexture 的生命周期
+    );
+    
+    return true;
+}
+
+bool PixelBufferInputStrategy::processToGPUPlanar(const InputData& input,
+                                                   std::shared_ptr<lrengine::render::LRPlanarTexture>& outputTexture) {
     if (!mInitialized) {
+        PIPELINE_LOGE("PixelBufferInputStrategy not initialized");
         return false;
     }
     
@@ -72,12 +103,22 @@ bool PixelBufferInputStrategy::processToGPU(const InputData& input,
     }
     
     // 创建 Metal 纹理
-    return createMetalTextureFromPixelBuffer(pixelBuffer);
+    if (!createMetalTextureFromPixelBuffer(pixelBuffer)) {
+        PIPELINE_LOGE("Failed to create Metal texture from PixelBuffer");
+        return false;
+    }
+    
+    // 🔥 关键修复：将 mOutputTexture 赋值给 outputTexture 参数
+    outputTexture = mOutputTexture;
+    
+    return outputTexture != nullptr;
 }
 
 bool PixelBufferInputStrategy::processToCPU(const InputData& input,
                                              uint8_t* outputBuffer,
-                                             size_t& outputSize) {
+                                             size_t& outputSize,
+                                             uint32_t targetWidth,
+                                             uint32_t targetHeight) {
     if (!mInitialized || !outputBuffer) {
         return false;
     }
@@ -96,7 +137,7 @@ bool PixelBufferInputStrategy::processToCPU(const InputData& input,
         return false;
     }
     
-    return readCPUDataFromPixelBuffer(pixelBuffer, outputBuffer, outputSize);
+    return readCPUDataFromPixelBuffer(pixelBuffer, outputBuffer, outputSize, targetWidth, targetHeight);
 }
 
 void PixelBufferInputStrategy::release() {
@@ -156,11 +197,31 @@ bool PixelBufferInputStrategy::createMetalTextureFromPixelBuffer(CVPixelBufferRe
 
 bool PixelBufferInputStrategy::readCPUDataFromPixelBuffer(CVPixelBufferRef pixelBuffer,
                                                            uint8_t* outputBuffer,
-                                                           size_t& outputSize) {
-    uint32_t width, height;
+                                                           size_t& outputSize,
+                                                           uint32_t targetWidth,
+                                                           uint32_t targetHeight) {
+    uint32_t srcWidth, srcHeight;
     OSType pixelFormat;
     
-    if (!getPixelBufferInfo(pixelBuffer, width, height, pixelFormat)) {
+    if (!getPixelBufferInfo(pixelBuffer, srcWidth, srcHeight, pixelFormat)) {
+        return false;
+    }
+    
+    // 确定目标尺寸（如果未指定则使用源尺寸）
+    uint32_t dstWidth = (targetWidth > 0) ? targetWidth : srcWidth;
+    uint32_t dstHeight = (targetHeight > 0) ? targetHeight : srcHeight;
+    
+    // 检查是否需要缩放
+    bool needScale = (srcWidth != dstWidth || srcHeight != dstHeight);
+    
+    // 计算所需的输出缓冲区大小（RGBA 格式，4 字节/像素）
+    size_t requiredSize = static_cast<size_t>(dstWidth) * dstHeight * 4;
+    
+    // 检查输出缓冲区是否足够
+    if (outputSize < requiredSize) {
+        PIPELINE_LOGW("Output buffer too small: %zu < %zu, required for %ux%u",
+                     outputSize, requiredSize, dstWidth, dstHeight);
+        outputSize = requiredSize;
         return false;
     }
     
@@ -172,30 +233,39 @@ bool PixelBufferInputStrategy::readCPUDataFromPixelBuffer(CVPixelBufferRef pixel
     }
     
     bool success = false;
-    size_t requiredSize = width * height * 4; // RGBA output
     
-    if (outputSize < requiredSize) {
-        outputSize = requiredSize;
-        CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
-        return false;
+    // 临时缓冲区：用于缩放时的中间 RGBA 数据
+    // 无论是否缩放，都使用统一的处理流程
+    std::vector<uint8_t> tempBuffer;
+    uint8_t* rgbaBuffer = outputBuffer;
+    int rgbaStride = static_cast<int>(dstWidth) * 4;
+    
+    if (needScale) {
+        // 需要缩放：先转换到源尺寸的临时缓冲区，再缩放
+        size_t tempSize = static_cast<size_t>(srcWidth) * srcHeight * 4;
+        tempBuffer.resize(tempSize);
+        rgbaBuffer = tempBuffer.data();
+        rgbaStride = static_cast<int>(srcWidth) * 4;
+        PIPELINE_LOGD("Scaling from %ux%u to %ux%u", srcWidth, srcHeight, dstWidth, dstHeight);
     }
     
+    // 格式转换：根据输入格式选择正确的转换函数
+    // 注意：libyuv 的 ARGB 格式实际上是 BGRA 内存布局（B 在最低位）
     if (pixelFormat == kCVPixelFormatType_32BGRA) {
-        // BGRA -> RGBA
+        // BGRA -> RGBA（使用 ARGBToABGR 进行通道重排）
         void* baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer);
         size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
         
         libyuv::ARGBToABGR(
             static_cast<const uint8_t*>(baseAddress), static_cast<int>(bytesPerRow),
-            outputBuffer, width * 4,
-            width, height);
+            rgbaBuffer, rgbaStride,
+            static_cast<int>(srcWidth), static_cast<int>(srcHeight));
         
         success = true;
-        outputSize = requiredSize;
         
     } else if (pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ||
                pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange) {
-        // NV12 -> RGBA
+        // NV12 -> RGBA（NV12ToARGB 输出 ARGB 格式，即 BGRA 内存布局）
         void* yPlane = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0);
         void* uvPlane = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1);
         size_t yBytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0);
@@ -204,14 +274,28 @@ bool PixelBufferInputStrategy::readCPUDataFromPixelBuffer(CVPixelBufferRef pixel
         libyuv::NV12ToARGB(
             static_cast<const uint8_t*>(yPlane), static_cast<int>(yBytesPerRow),
             static_cast<const uint8_t*>(uvPlane), static_cast<int>(uvBytesPerRow),
-            outputBuffer, width * 4,
-            width, height);
+            rgbaBuffer, rgbaStride,
+            static_cast<int>(srcWidth), static_cast<int>(srcHeight));
         
         success = true;
-        outputSize = requiredSize;
         
     } else {
-        PIPELINE_LOGE("Unsupported pixel format: %u", (unsigned)pixelFormat);
+        PIPELINE_LOGE("Unsupported pixel format: 0x%08X (%.4s)", 
+                     (unsigned)pixelFormat, (char*)&pixelFormat);
+    }
+    
+    // 缩放处理：从源尺寸缩放到目标尺寸
+    if (success && needScale) {
+        libyuv::ARGBScale(
+            tempBuffer.data(), static_cast<int>(srcWidth) * 4,
+            static_cast<int>(srcWidth), static_cast<int>(srcHeight),
+            outputBuffer, static_cast<int>(dstWidth) * 4,
+            static_cast<int>(dstWidth), static_cast<int>(dstHeight),
+            libyuv::kFilterBilinear);
+    }
+    
+    if (success) {
+        outputSize = requiredSize;
     }
     
     CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);

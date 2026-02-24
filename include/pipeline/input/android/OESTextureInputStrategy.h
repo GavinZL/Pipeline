@@ -56,7 +56,9 @@ public:
     
     bool processToCPU(const InputData& input,
                       uint8_t* outputBuffer,
-                      size_t& outputSize) override;
+                      size_t& outputSize,
+                      uint32_t targetWidth = 0,
+                      uint32_t targetHeight = 0) override;
     
     void release() override;
     

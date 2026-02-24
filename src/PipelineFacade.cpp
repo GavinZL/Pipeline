@@ -247,10 +247,24 @@ bool PipelineFacade::feedPixelBuffer(void* pixelBuffer, uint64_t timestamp) {
 
     CVPixelBufferRef buffer = static_cast<CVPixelBufferRef>(pixelBuffer);
 
+    // CVPixelBufferRef 的生命周期由调用者管理，异步任务可能在 buffer 释放后执行
+    CVPixelBufferRetain(buffer);
+    
     // 使用 InputEntity 提交 PixelBuffer
     input::InputData inputData;
     inputData.dataType = input::InputDataType::PlatformBuffer;
     inputData.platformBuffer = pixelBuffer;  // 传递平台 buffer
+    
+    // 当所有引用都释放后，自动调用 CVPixelBufferRelease
+    inputData.platformBufferHolder = std::shared_ptr<void>(
+        buffer,
+        [](void* ptr) {
+            if (ptr) {
+                CVPixelBufferRelease(static_cast<CVPixelBufferRef>(ptr));
+            }
+        }
+    );
+    
     inputData.cpu.timestamp = static_cast<int64_t>(timestamp);
     inputData.cpu.width = static_cast<uint32_t>(CVPixelBufferGetWidth(buffer));
     inputData.cpu.height = static_cast<uint32_t>(CVPixelBufferGetHeight(buffer));
@@ -489,12 +503,15 @@ bool PipelineFacade::setupInputBasedOnPreset() {
                 if (mPlatformContext) {
                     metalManager = mPlatformContext->getIOSMetalManager();
                 }
-                EntityId inputId = mPipelineManager->setupPixelBufferInput(width, height, metalManager);
+                // 🔥 优化：CameraPreview 不需要 CPU 输出，CameraRecord 可能需要用于编码
+                bool enableCPUOutput = (mConfig.preset == PipelinePreset::CameraRecord);
+                EntityId inputId = mPipelineManager->setupPixelBufferInput(width, height, metalManager, enableCPUOutput);
                 if (inputId == InvalidEntityId) {
                     PIPELINE_LOGE("Failed to setup PixelBuffer input");
                     return false;
                 }
-                PIPELINE_LOGI("PixelBuffer input configured for preset");
+                PIPELINE_LOGI("PixelBuffer input configured for preset, CPU output: %s", 
+                             enableCPUOutput ? "enabled" : "disabled");
                 return true;
             }
 #elif defined(__ANDROID__)
@@ -555,6 +572,33 @@ bool PipelineFacade::setupOutputEntity() {
     if (outputId == InvalidEntityId) {
         PIPELINE_LOGE("Failed to create output entity");
         return false;
+    }
+    
+    // 建立连接：InputEntity -> OutputEntity
+    EntityId inputId = mPipelineManager->getInputEntityId();
+    if (inputId != InvalidEntityId) {
+        // InputEntity 有两个输出端口: "gpu_out" 和 "cpu_out"
+        // OutputEntity 有两个输入端口: "gpu_in" 和 "cpu_in"
+        
+        // 连接 GPU 输出端口
+        if (!mPipelineManager->connect(inputId, input::GPU_OUTPUT_PORT, 
+                                       outputId, output::GPU_INPUT_PORT)) {
+            PIPELINE_LOGE("Failed to connect InputEntity(gpu_out) to OutputEntity(gpu_in)");
+        } else {
+            PIPELINE_LOGI("Connected InputEntity(%llu):gpu_out -> OutputEntity(%llu):gpu_in", 
+                         inputId, outputId);
+        }
+        
+        // 连接 CPU 输出端口
+        if (!mPipelineManager->connect(inputId, input::CPU_OUTPUT_PORT, 
+                                       outputId, output::CPU_INPUT_PORT)) {
+            PIPELINE_LOGE("Failed to connect InputEntity(cpu_out) to OutputEntity(cpu_in)");
+        } else {
+            PIPELINE_LOGI("Connected InputEntity(%llu):cpu_out -> OutputEntity(%llu):cpu_in", 
+                         inputId, outputId);
+        }
+    } else {
+        PIPELINE_LOGW("InputEntity not found, skip connection");
     }
     
     PIPELINE_LOGI("Output entity created, ID: %d", outputId);

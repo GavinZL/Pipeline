@@ -7,6 +7,10 @@
 #include "pipeline/data/FramePacket.h"
 #include "pipeline/core/PipelineConfig.h"
 #include "pipeline/core/PipelineExecutor.h"
+#include "pipeline/utils/PipelineLog.h"
+#include "lrengine/core/LRPlanarTexture.h"
+
+#include <chrono>
 
 // libyuv 头文件
 #include "libyuv.h"
@@ -91,23 +95,28 @@ bool InputEntity::submitGPUData(const GPUInputData& data) {
 }
 
 bool InputEntity::submitData(const InputData& data) {
-    std::unique_lock<std::mutex> lock(mQueueMutex);
-    
-    // 检查队列是否满
-    if (mInputQueue.size() >= mMaxQueueSize) {
-        if (mDropOldestOnFull) {
-            mInputQueue.pop();  // 丢弃最旧帧
-            // TODO: 使用PIPELINE_LOGW记录
-        } else {
-            // 丢弃新帧
+    {
+        std::unique_lock<std::mutex> lock(mQueueMutex);
+        
+        // 检查任务是否正在运行
+        if (!mTaskRunning.load()) {
+            PIPELINE_LOGW("Submit data while task not running");
             return false;
         }
+        
+        // 检查队列是否满
+        if (mInputQueue.size() >= mMaxQueueSize) {
+            if (mDropOldestOnFull) {
+                mInputQueue.pop();  // 丢弃最旧帧
+            } else {
+                // 丢弃新帧
+                return false;
+            }
+        }
+        mInputQueue.push(data);
     }
     
-    // 入队
-    mInputQueue.push(data);
-    
-    // 🔥 关键: 唤醒等待的process任务
+    // 在锁外通知，避免不必要的唤醒竞争
     mDataAvailableCV.notify_one();
     
     return true;
@@ -243,7 +252,7 @@ bool InputEntity::prepare(PipelineContext& context) {
     // 获取渲染上下文（如果尚未设置）
     if (!mRenderContext) {
         // 从 context 获取 LRRenderContext
-        // mRenderContext = context.getRenderContext();
+         mRenderContext = context.getRenderContext();
     }
     
     return true;
@@ -257,28 +266,41 @@ bool InputEntity::process(const std::vector<FramePacketPtr>& inputs,
     {
         std::unique_lock<std::mutex> lock(mQueueMutex);
         
-        // 🔥 关键改进: 先检查队列是否有数据
+        // 快速路径：队列非空，直接处理
         if (!mInputQueue.empty()) {
-            // 队列有数据,立即处理,不等待
             inputData = mInputQueue.front();
             mInputQueue.pop();
-            // TODO: 使用PIPELINE_LOGD记录
+        } else if (!mTaskRunning.load()) {
+            // 任务已停止，直接返回
+            return false;
         } else {
-            // 队列为空,等待数据到达
+            // 等待数据，使用超时机制防止永久阻塞
             mWaitingForData.store(true);
-            mDataAvailableCV.wait(lock, [this] { 
+            
+            // 设置超时等待（最多等待 5 秒）
+            constexpr auto kWaitTimeout = std::chrono::seconds(5);
+            bool notified = mDataAvailableCV.wait_for(lock, kWaitTimeout, [this] { 
                 return !mInputQueue.empty() || !mTaskRunning.load(); 
             });
+            
             mWaitingForData.store(false);
             
             // 检查任务是否被取消
             if (!mTaskRunning.load()) {
+                PIPELINE_LOGI("Process stopped by task cancellation");
                 return false;
             }
             
-            // 再次检查队列
+            // 超时检查
+            if (!notified) {
+                PIPELINE_LOGW("Wait for input data timeout after %ld seconds", 
+                             kWaitTimeout.count());
+                return false;
+            }
+            
+            // 再次检查队列（可能在等待期间有其他线程消费）
             if (mInputQueue.empty()) {
-                // TODO: 使用PIPELINE_LOGW记录
+                PIPELINE_LOGW("Input queue is empty after wait");
                 return false;
             }
             
@@ -342,15 +364,32 @@ bool InputEntity::processInputData(const InputData& data) {
     // 使用策略处理（如果有）
     if (mStrategy) {
         if (isGPUOutputEnabled()) {
-            if (!mStrategy->processToGPU(data, mGPUOutputTexture)) {
-                return false;
+            if (!mStrategy->processToGPUPlanar(data, mGPUOutputPlanarTexture)) {
+                if (!mStrategy->processToGPU(data, mGPUOutputTexture)) {
+                    return false;
+                }
             }
         }
         
         if (isCPUOutputEnabled()) {
             size_t outputSize = mCPUOutputBuffer.size();
-            if (!mStrategy->processToCPU(data, mCPUOutputBuffer.data(), outputSize)) {
-                return false;
+            if (!mStrategy->processToCPU(data, mCPUOutputBuffer.data(), outputSize,
+                                         mConfig.width, mConfig.height)) {
+                // processToCPU 会更新 outputSize 为需要的大小
+                if (outputSize > mCPUOutputBuffer.size()) {
+                    PIPELINE_LOGD("Resizing CPU output buffer: %zu -> %zu", 
+                                 mCPUOutputBuffer.size(), outputSize);
+                    mCPUOutputBuffer.resize(outputSize);
+                    // 重试
+                    if (!mStrategy->processToCPU(data, mCPUOutputBuffer.data(), outputSize,
+                                                 mConfig.width, mConfig.height)) {
+                        PIPELINE_LOGE("processToCPU failed after buffer resize");
+                        return false;
+                    }
+                } else {
+                    PIPELINE_LOGE("processToCPU failed");
+                    return false;
+                }
             }
         }
         return true;
@@ -358,9 +397,7 @@ bool InputEntity::processInputData(const InputData& data) {
     
     // 默认处理：格式转换
     if (data.dataType == InputDataType::CPUBuffer) {
-        // CPU 数据需要上传到 GPU（如果启用 GPU 输出）
         if (isGPUOutputEnabled() && isCPUOutputEnabled()) {
-            // 双路输出：转换为 RGBA 供 GPU 使用
             if (!convertToRGBA(data.cpu, mCPUOutputBuffer.data())) {
                 return false;
             }
@@ -376,8 +413,10 @@ FramePacketPtr InputEntity::createGPUOutputPacket(int64_t timestamp) {
     packet->setFormat(PixelFormat::RGBA8);
     packet->setSize(mConfig.width, mConfig.height);
     
-    // 设置纹理
-    if (mGPUOutputTexture) {
+    // 🔥 优先使用多平面纹理
+    if (mGPUOutputPlanarTexture) {
+        packet->setPlanarTexture(mGPUOutputPlanarTexture);
+    } else if (mGPUOutputTexture) {
         packet->setTexture(mGPUOutputTexture);
     }
     
@@ -402,8 +441,10 @@ FramePacketPtr InputEntity::createCPUOutputPacket(int64_t timestamp) {
     }
     
     // 设置 CPU 数据
+    // 注意：mCPUOutputBuffer 是 InputEntity 的成员，其生命周期由 InputEntity 管理
+    // takeOwnership = false 表示不接管所有权，FramePacket 会复制数据到自己的缓冲区
     if (!mCPUOutputBuffer.empty()) {
-        packet->setCpuBuffer(mCPUOutputBuffer.data(), mCPUOutputBuffer.size());
+        packet->setCpuBuffer(mCPUOutputBuffer.data(), mCPUOutputBuffer.size(), false);
     }
     
     return packet;
@@ -548,19 +589,28 @@ bool InputEntity::convertToYUV420P(const CPUInputData& input,
 // =============================================================================
 
 void InputEntity::startProcessingLoop() {
+    // 先设置运行状态，再投递任务
     mTaskRunning.store(true);
     
     // 将process任务投递到TaskQueue (通过PipelineExecutor)
     if (mExecutor) {
         mExecutor->submitEntityTask(this->getId());
     }
-    // TODO: 使用PIPELINE_LOGI记录
+    PIPELINE_LOGI("InputEntity processing loop started");
 }
 
 void InputEntity::stopProcessingLoop() {
-    mTaskRunning.store(false);
-    mDataAvailableCV.notify_all();  // 唤醒所有等待的任务
-    // TODO: 使用PIPELINE_LOGI记录
+    // 使用锁保护，确保 store 和 notify_all 是原子操作
+    // 这样可以避免 notify 在 wait 检查条件之前发送的竞态条件
+    {
+        std::lock_guard<std::mutex> lock(mQueueMutex);
+        mTaskRunning.store(false);
+    }
+    
+    // 在锁外通知，唤醒所有等待的线程
+    mDataAvailableCV.notify_all();
+    
+    PIPELINE_LOGI("InputEntity processing loop stopped, frame count: %lu", mFrameCount);
 }
 
 } // namespace input

@@ -54,9 +54,14 @@ public:
     bool processToGPU(const InputData& input,
                       lrengine::LRTexturePtr& outputTexture) override;
     
+    bool processToGPUPlanar(const InputData& input,
+                            std::shared_ptr<lrengine::render::LRPlanarTexture>& outputTexture) override;
+    
     bool processToCPU(const InputData& input,
                       uint8_t* outputBuffer,
-                      size_t& outputSize) override;
+                      size_t& outputSize,
+                      uint32_t targetWidth = 0,
+                      uint32_t targetHeight = 0) override;
     
     void release() override;
     
@@ -96,7 +101,9 @@ private:
     // 从 CVPixelBuffer 读取 CPU 数据
     bool readCPUDataFromPixelBuffer(CVPixelBufferRef pixelBuffer,
                                      uint8_t* outputBuffer,
-                                     size_t& outputSize);
+                                     size_t& outputSize,
+                                     uint32_t targetWidth = 0,
+                                     uint32_t targetHeight = 0);
     
     // 获取 PixelBuffer 格式信息
     bool getPixelBufferInfo(CVPixelBufferRef pixelBuffer,

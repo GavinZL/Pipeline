@@ -128,11 +128,24 @@ public:
      * @brief 设置显示配置
      */
     void setDisplayConfig(const DisplayConfig& config);
-    
+
+private:
+    // CPU 数据上传到纹理
+    std::shared_ptr<lrengine::render::LRPlanarTexture> getOrCreateCpuPlanarTexture(
+        lrengine::render::LRRenderContext* context,
+        uint32_t width, uint32_t height,
+        OutputFormat format);
+
 private:
     std::string mName;
     DisplaySurfacePtr mSurface;
     DisplayConfig mDisplayConfig;
+    
+    // CPU 数据渲染用的临时纹理
+    std::shared_ptr<lrengine::render::LRPlanarTexture> mCpuDataPlanarTexture;
+    uint32_t mCpuDataWidth = 0;
+    uint32_t mCpuDataHeight = 0;
+    OutputFormat mCpuDataFormat = OutputFormat::RGBA;
 };
 
 // =============================================================================

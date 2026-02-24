@@ -42,7 +42,7 @@ vertex VertexOut displayVertex(VertexIn in [[stage_in]],
 fragment float4 displayFragment(VertexOut in [[stage_in]],
                                  texture2d<float> tex [[texture(0)]],
                                  sampler samp [[sampler(0)]]) {
-    return tex.sample(samp, in.texCoord);
+    return tex.sample(samp, in.texCoord).bgra;
 }
 )";
 

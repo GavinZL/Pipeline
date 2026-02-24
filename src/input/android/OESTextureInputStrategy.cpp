@@ -111,7 +111,9 @@ bool OESTextureInputStrategy::processToGPU(const InputData& input,
 
 bool OESTextureInputStrategy::processToCPU(const InputData& input,
                                             uint8_t* outputBuffer,
-                                            size_t& outputSize) {
+                                            size_t& outputSize,
+                                            uint32_t targetWidth,
+                                            uint32_t targetHeight) {
     if (!mInitialized || !outputBuffer) {
         return false;
     }

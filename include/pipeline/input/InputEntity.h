@@ -97,7 +97,13 @@ struct InputData {
     
     // 平台特定 buffer (CVPixelBufferRef / AHardwareBuffer 等)
     void* platformBuffer = nullptr;
+    
+    // 🔥 新增：用于管理平台 buffer 的生命周期
+    // 使用 shared_ptr + 自定义删除器来确保 buffer 在使用期间不被释放
+    std::shared_ptr<void> platformBufferHolder;
 };
+
+// LRPlanarTexture 前向声明在全局 lrengine 命名空间中已存在
 
 // =============================================================================
 // 输入策略接口
@@ -123,24 +129,44 @@ public:
     virtual bool initialize(lrengine::render::LRRenderContext* context) = 0;
     
     /**
-     * @brief 处理输入数据，生成 GPU 纹理
+     * @brief 处理输入数据，生成 GPU 纹理 (旧接口，兼容性保留)
      * @param input 输入数据
-     * @param outputTexture 输出纹理
+     * @param outputTexture 输出纹理 (LRTexture)
      * @return 是否成功
+     * @deprecated 请使用 processToGPUPlanar
      */
     virtual bool processToGPU(const InputData& input,
-                              lrengine::LRTexturePtr& outputTexture) = 0;
+                              lrengine::LRTexturePtr& outputTexture) {
+        // 默认实现返回失败
+        return false;
+    }
+    
+    /**
+     * @brief 处理输入数据，生成多平面 GPU 纹理 (推荐)
+     * @param input 输入数据
+     * @param outputTexture 输出纹理 (LRPlanarTexture)
+     * @return 是否成功
+     */
+    virtual bool processToGPUPlanar(const InputData& input,
+                                    std::shared_ptr<lrengine::render::LRPlanarTexture>& outputTexture) {
+        // 默认实现返回失败，子类应重写此方法
+        return false;
+    }
     
     /**
      * @brief 处理输入数据，生成 CPU 数据
      * @param input 输入数据
      * @param outputBuffer 输出缓冲区
-     * @param outputSize 输出大小
+     * @param outputSize 输入时为缓冲区大小，输出时为实际写入大小
+     * @param targetWidth 目标宽度（可选，0 表示使用原始尺寸）
+     * @param targetHeight 目标高度（可选，0 表示使用原始尺寸）
      * @return 是否成功
      */
     virtual bool processToCPU(const InputData& input,
                               uint8_t* outputBuffer,
-                              size_t& outputSize) = 0;
+                              size_t& outputSize,
+                              uint32_t targetWidth = 0,
+                              uint32_t targetHeight = 0) = 0;
     
     /**
      * @brief 释放资源
@@ -391,8 +417,8 @@ private:
     // 帧计数
     uint64_t mFrameCount = 0;
     
-    // GPU 输出纹理
     lrengine::LRTexturePtr mGPUOutputTexture;
+    std::shared_ptr<lrengine::render::LRPlanarTexture> mGPUOutputPlanarTexture;
     
     // CPU 输出缓冲区
     std::vector<uint8_t> mCPUOutputBuffer;

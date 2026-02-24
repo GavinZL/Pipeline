@@ -91,7 +91,7 @@ bool PipelineManager::initialize() {
     execConfig.enableParallelExecution = getConfig().enableParallelExecution;
     execConfig.enableFrameSkipping = getConfig().enableFrameSkipping;
     
-    mExecutor = std::make_unique<PipelineExecutor>(mGraph.get(), execConfig);
+    mExecutor = std::make_shared<PipelineExecutor>(mGraph.get(), execConfig);
     
     mContext->setTexturePool(mTexturePool);
     mContext->setFramePacketPool(mFramePacketPool);
@@ -513,7 +513,7 @@ EntityId PipelineManager::setupInput(const input::InputConfig& config) {
 }
 
 #if defined(__APPLE__)
-EntityId PipelineManager::setupPixelBufferInput(uint32_t width, uint32_t height, void* metalManager) {
+EntityId PipelineManager::setupPixelBufferInput(uint32_t width, uint32_t height, void* metalManager, bool enableCPUOutput) {
     if (mInputEntity) {
         PIPELINE_LOGW("InputEntity already exists, replacing it");
         if (mInputEntityId != InvalidEntityId) {
@@ -527,7 +527,7 @@ EntityId PipelineManager::setupPixelBufferInput(uint32_t width, uint32_t height,
     
     // 配置
     input::InputConfig config;
-    config.enableDualOutput = true;
+    config.enableDualOutput = enableCPUOutput;  // 🔥 修改：根据参数决定是否启用 CPU 输出
     config.width = width;
     config.height = height;
     mInputEntity->configure(config);

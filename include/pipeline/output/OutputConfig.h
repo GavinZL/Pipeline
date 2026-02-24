@@ -10,6 +10,14 @@
 #include <functional>
 #include <memory>
 
+// 前向声明
+namespace lrengine {
+namespace render {
+class LRTexture;
+class LRPlanarTexture;
+} // namespace render
+} // namespace lrengine
+
 namespace pipeline {
 namespace output {
 
@@ -192,9 +200,12 @@ struct OutputData {
     const uint8_t* cpuData = nullptr;
     size_t cpuDataSize = 0;
     
-    // GPU 数据
+    // GPU 数据（原始句柄）
     uint32_t textureId = 0;
     void* metalTexture = nullptr;
+    
+    // GPU 数据（统一使用多平面纹理，RGBA 作为单平面）
+    std::shared_ptr<lrengine::render::LRPlanarTexture> planarTexture;
     
     // 元信息
     uint32_t width = 0;
@@ -202,6 +213,15 @@ struct OutputData {
     OutputFormat format = OutputFormat::RGBA;
     int64_t timestamp = 0;
     uint64_t frameId = 0;
+    
+    // 便捷方法
+    bool hasGpuData() const {
+        return planarTexture || textureId != 0 || metalTexture != nullptr;
+    }
+    
+    bool hasCpuData() const {
+        return cpuData != nullptr && cpuDataSize > 0;
+    }
 };
 
 } // namespace output

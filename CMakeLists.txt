@@ -12,6 +12,27 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ============================================
+# 调试配置
+# ============================================
+# 确保生成调试符号
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g -O0")
+
+# Xcode 生成器调试配置
+if(CMAKE_GENERATOR MATCHES "Xcode")
+    # 设置调试信息格式为 DWARF with dSYM
+    set(CMAKE_XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT "dwarf-with-dsym")
+    # Debug 配置生成调试符号
+    set(CMAKE_XCODE_ATTRIBUTE_GCC_GENERATE_DEBUGGING_SYMBOLS[variant=Debug] "YES")
+    # Debug 配置禁用优化
+    set(CMAKE_XCODE_ATTRIBUTE_GCC_OPTIMIZATION_LEVEL[variant=Debug] "0")
+    # Release 配置优化级别
+    set(CMAKE_XCODE_ATTRIBUTE_GCC_OPTIMIZATION_LEVEL[variant=Release] "s")
+    # 保留调试符号在 Release 中（可选，便于崩溃分析）
+    set(CMAKE_XCODE_ATTRIBUTE_STRIP_INSTALLED_PRODUCT[variant=Debug] "NO")
+endif()
+
+# ============================================
 # 选项
 # ============================================
 option(PIPELINE_BUILD_EXAMPLES "Build examples" OFF)
@@ -205,8 +226,14 @@ endif()
 # ============================================
 if(MSVC)
     target_compile_options(Pipeline PRIVATE /W4)
+    # MSVC 调试配置
+    target_compile_options(Pipeline PRIVATE "$<$<CONFIG:Debug>:/Zi>")
 else()
     target_compile_options(Pipeline PRIVATE -Wall -Wextra -Wpedantic)
+    # GCC/Clang 调试配置
+    target_compile_options(Pipeline PRIVATE "$<$<CONFIG:Debug>:-g>")
+    target_compile_options(Pipeline PRIVATE "$<$<CONFIG:Debug>:-O0>")
+    target_compile_options(Pipeline PRIVATE "$<$<CONFIG:Debug>:-fno-omit-frame-pointer>")
 endif()
 
 # ============================================

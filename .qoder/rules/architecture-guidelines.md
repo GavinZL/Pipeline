@@ -67,6 +67,41 @@ bool MyEntity::execute(PipelineContext& context) {
 - ✅ 删除锁时分析是否真的需要锁保护
 - ✅ 编译验证后必须运行测试
 
+## Pipeline 初始化时序规则（必须遵循）
+
+**来源**: `/Volumes/LiSSD/AI_Compound_Framework/projects/pipeline/experiences/maccameraapp-pipeline-troubleshooting.md`
+
+**正确调用顺序**:
+```
+create(config) → initialize() → setupDisplayOutput() → start() → feedPixelBuffer()
+```
+
+**依赖关系**:
+- `create()`: 创建 PipelineFacade 实例（不初始化内部组件）
+- `initialize()`: 创建 PlatformContext、RenderContext、PipelineManager
+- `setupDisplayOutput()`: 需要 mPipelineManager 已存在，需要 MetalContextManager
+- `start()`: 启动 Pipeline 执行
+- `feedPixelBuffer()`: 需要 Pipeline 处于 Running 状态
+
+**常见错误**:
+```cpp
+// ❌ 错误 - setupDisplayOutput 在 initialize 之前调用
+auto pipeline = PipelineFacade::create(config);
+pipeline->setupDisplayOutput(...);  // mPipelineManager 为空！
+pipeline->start();
+
+// ✅ 正确 - 先 initialize 再 setupDisplayOutput
+auto pipeline = PipelineFacade::create(config);
+pipeline->initialize();             // 创建 mPipelineManager
+pipeline->setupDisplayOutput(...);  // 现在可以工作了
+pipeline->start();
+```
+
+**MetalContextManager 传递**:
+- `setupDisplayOutput()` 需要 `MetalContextManager` 来创建 `iOSMetalSurface`
+- 必须从 `PlatformContext::getIOSMetalManager()` 获取并传递
+- 链式传递: `PipelineFacade` → `PipelineManager` → `iOSMetalSurface`
+
 ## 模块特定规则
 
 ### InputEntity
@@ -115,6 +150,29 @@ bool MyEntity::execute(PipelineContext& context) {
 - 支持NV12/BGRA等多种格式
 - 封装为LRTexture统一处理
 
+**CVPixelBuffer数据传递（重要）**:
+- ✅ `InputData` 必须包含 `platformBuffer` 字段来传递 CVPixelBuffer
+- ✅ `PixelBufferInputStrategy::processToGPU()` 优先使用 `input.platformBuffer`
+- ✅ 使用 `static_cast<CVPixelBufferRef>(input.platformBuffer)` 获取缓冲区
+- ⚠️ 不要依赖 `mCurrentPixelBuffer` 成员变量，它可能未被设置
+
+### macOS平台
+
+**相机权限配置**:
+- ✅ 必须创建 `.entitlements` 文件，声明 `com.apple.security.device.camera`
+- ✅ Xcode 配置 `CODE_SIGN_ENTITLEMENTS` 指向该文件
+- ✅ `Info.plist` 添加 `NSCameraUsageDescription`
+- ⚠️ `ENABLE_APP_SANDBOX = YES` 时需要额外权限声明
+
+**Metal纹理存储模式（重要）**:
+- ✅ 非深度纹理使用 `MTLStorageModeManaged`（macOS）或 `MTLStorageModeShared`（iOS）
+- ❌ 禁止对需要 CPU 数据更新的纹理使用 `MTLStorageModePrivate`
+- 原因：`replaceRegion` 方法在 Private 模式下不可用
+
+**CAMetalLayer时序**:
+- ✅ 在 `viewDidAppear()` 中调用 `view.layoutSubtreeIfNeeded()` 强制布局
+- ✅ 检查 `drawableSize` 和 `bounds` 都有效后再创建 Pipeline
+
 ## 性能优化规则
 
 ### 零拷贝
@@ -150,6 +208,21 @@ bool MyEntity::execute(PipelineContext& context) {
 - 使用std::atomic<bool>作为状态标志
 - 条件变量配合mutex使用
 
+**shared_from_this() 安全调用**:
+- ⚠️ `shared_from_this()` 要求对象必须被 `shared_ptr` 正确管理
+- ✅ 使用 try-catch 保护 `shared_from_this()` 调用
+- ✅ 在异常情况下提供降级处理
+```cpp
+// ✅ 正确 - 安全调用 shared_from_this
+try {
+    auto self = shared_from_this();
+    mCallBack(self);
+} catch (const std::bad_weak_ptr& e) {
+    LOGE("shared_from_this() failed: %s", e.what());
+    mCallBack(nullptr);  // 降级处理
+}
+```
+
 ## 参考资源
 
 ### AI复利框架经验
@@ -164,6 +237,7 @@ bool MyEntity::execute(PipelineContext& context) {
 
 ### 完整实施经验
 - [Pipeline异步任务驱动架构重构](/Volumes/LiSSD/AI_Compound_Framework/projects/pipeline/experiences/async-task-driven-refactoring.md)
+- [MacCameraApp Pipeline全链路问题排查](/Volumes/LiSSD/AI_Compound_Framework/projects/pipeline/experiences/maccameraapp-pipeline-troubleshooting.md)
 
 ## 使用指南
 
@@ -182,6 +256,7 @@ bool MyEntity::execute(PipelineContext& context) {
 
 ---
 
-**版本**: v1.0  
+**版本**: v1.1  
 **创建日期**: 2026-01-27  
+**最后更新**: 2026-02-24  
 **维护者**: Pipeline Team

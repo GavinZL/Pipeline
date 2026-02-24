@@ -6,6 +6,10 @@
 #include "pipeline/output/OutputEntity.h"
 #include "pipeline/data/FramePacket.h"
 #include "pipeline/core/PipelineConfig.h"
+#include "lrengine/core/LRPlanarTexture.h"
+#include "lrengine/core/LRRenderContext.h"
+#include "lrengine/core/LRTexture.h"
+#include "lrengine/core/LRTypes.h"
 
 namespace pipeline {
 namespace output {
@@ -30,9 +34,55 @@ bool DisplayOutputTarget::initialize() {
 }
 
 void DisplayOutputTarget::release() {
+    mCpuDataPlanarTexture.reset();
     if (mSurface) {
         mSurface->release();
     }
+}
+
+// 转换 OutputFormat 到 PlanarFormat
+static lrengine::render::PlanarFormat toPlanarFormat(OutputFormat format) {
+    switch (format) {
+        case OutputFormat::YUV420: return lrengine::render::PlanarFormat::YUV420P;
+        case OutputFormat::NV12:   return lrengine::render::PlanarFormat::NV12;
+        case OutputFormat::NV21:   return lrengine::render::PlanarFormat::NV21;
+        default:                   return lrengine::render::PlanarFormat::RGBA;
+    }
+}
+
+std::shared_ptr<lrengine::render::LRPlanarTexture> DisplayOutputTarget::getOrCreateCpuPlanarTexture(
+    lrengine::render::LRRenderContext* context,
+    uint32_t width, uint32_t height,
+    OutputFormat format) {
+    
+    // 检查是否需要重新创建纹理
+    if (mCpuDataPlanarTexture && mCpuDataWidth == width && 
+        mCpuDataHeight == height && mCpuDataFormat == format) {
+        return mCpuDataPlanarTexture;
+    }
+    
+    // 创建多平面纹理（支持所有格式）
+    lrengine::render::PlanarTextureDescriptor desc;
+    desc.width = width;
+    desc.height = height;
+    desc.format = toPlanarFormat(format);
+    desc.debugName = "DisplayOutputTarget_CpuDataTexture";
+    
+    auto* rawTexture = context->CreatePlanarTexture(desc);
+    if (!rawTexture) {
+        return nullptr;
+    }
+    
+    mCpuDataPlanarTexture = std::shared_ptr<lrengine::render::LRPlanarTexture>(
+        rawTexture,
+        [](lrengine::render::LRPlanarTexture* tex) {}
+    );
+    
+    mCpuDataWidth = width;
+    mCpuDataHeight = height;
+    mCpuDataFormat = format;
+    
+    return mCpuDataPlanarTexture;
 }
 
 bool DisplayOutputTarget::output(const OutputData& data) {
@@ -45,12 +95,59 @@ bool DisplayOutputTarget::output(const OutputData& data) {
         return false;
     }
     
-    // 渲染纹理
-    // TODO: 从 OutputData 获取纹理并渲染
-    // mSurface->renderTexture(texture, mDisplayConfig);
+    bool renderSuccess = false;
+    
+    // 优先使用 GPU 纹理数据
+    if (data.planarTexture) {
+        // 从 planarTexture 获取第一个平面渲染
+        auto planeTexture = data.planarTexture->GetPlaneTexture(0);
+        if (planeTexture) {
+            auto texturePtr = std::shared_ptr<lrengine::render::LRTexture>(
+                planeTexture, [](lrengine::render::LRTexture*) {});
+            renderSuccess = mSurface->renderTexture(texturePtr, mDisplayConfig);
+        }
+    } else if (data.textureId != 0 || data.metalTexture != nullptr) {
+        // 原始纹理句柄，需要转换（当前框架不支持，跳过）
+        // TODO: 实现从原始句柄创建 LRTexture 的逻辑
+    } else if (data.hasCpuData()) {
+        // CPU 数据渲染：统一使用 PlanarTexture（支持所有格式）
+        auto* context = mSurface->getRenderContext();
+        if (context && data.width > 0 && data.height > 0) {
+            auto planarTexture = getOrCreateCpuPlanarTexture(
+                context, data.width, data.height, data.format);
+            if (planarTexture) {
+                // 根据 format 解析 CPU 数据并上传到各平面
+                if (data.format == OutputFormat::YUV420) {
+                    // YUV420P: 3平面 (Y, U, V)
+                    uint32_t ySize = data.width * data.height;
+                    uint32_t uvSize = ySize / 4;
+                    const uint8_t* yData = data.cpuData;
+                    const uint8_t* uData = yData + ySize;
+                    const uint8_t* vData = uData + uvSize;
+                    planarTexture->UpdateAllPlanes({yData, uData, vData});
+                } else if (data.format == OutputFormat::NV12 || data.format == OutputFormat::NV21) {
+                    // NV12/NV21: 2平面 (Y + UV)
+                    uint32_t ySize = data.width * data.height;
+                    const uint8_t* yData = data.cpuData;
+                    const uint8_t* uvData = yData + ySize;
+                    planarTexture->UpdateAllPlanes({yData, uvData});
+                } else {
+                    // RGBA/BGRA/RGB: 单平面
+                    planarTexture->UpdateAllPlanes({data.cpuData});
+                }
+                // 渲染第一个平面
+                auto planeTexture = planarTexture->GetPlaneTexture(0);
+                if (planeTexture) {
+                    auto texturePtr = std::shared_ptr<lrengine::render::LRTexture>(
+                        planeTexture, [](lrengine::render::LRTexture*) {});
+                    renderSuccess = mSurface->renderTexture(texturePtr, mDisplayConfig);
+                }
+            }
+        }
+    }
     
     // 结束帧
-    return mSurface->endFrame();
+    return mSurface->endFrame() && renderSuccess;
 }
 
 bool DisplayOutputTarget::isReady() const {
@@ -123,8 +220,9 @@ OutputEntity::~OutputEntity() {
 // =============================================================================
 
 void OutputEntity::initializePorts() {
-    // 添加默认输入端口
-    addInputPort(DEFAULT_INPUT_PORT);
+    // 添加双路输入端口，对应 InputEntity 的双路输出
+    addInputPort(GPU_INPUT_PORT);   // 接收 GPU 纹理数据
+    addInputPort(CPU_INPUT_PORT);   // 接收 CPU 缓冲区数据
 }
 
 // =============================================================================
@@ -272,8 +370,6 @@ bool OutputEntity::process(const std::vector<FramePacketPtr>& inputs,
             processOutput(packet);
         }
     }
-    
-    // OutputEntity 不产生输出到下游
     return true;
 }
 
@@ -297,19 +393,19 @@ bool OutputEntity::processOutput(FramePacketPtr packet) {
     data.timestamp = packet->getTimestamp();
     data.frameId = packet->getFrameId();
     
+    // GPU 数据（统一使用 planarTexture）
+    data.planarTexture = packet->getPlanarTexture();
+    
     // CPU 数据
     const uint8_t* cpuBuffer = packet->getCpuBufferNoLoad();
     if (cpuBuffer) {
         data.cpuData = cpuBuffer;
-        // data.cpuDataSize = packet->getCpuBufferSize();
-    }
-    
-    // GPU 数据
-    auto texture = packet->getTexture();
-    if (texture) {
-        // 获取纹理 ID（平台相关）
-        // data.textureId = texture->getGLTextureId();
-        // data.metalTexture = texture->getMetalTexture();
+        // 计算 CPU 数据大小
+        uint32_t stride = packet->getStride();
+        if (stride == 0) {
+            stride = data.width * 4;  // 假设 RGBA
+        }
+        data.cpuDataSize = stride * data.height;
     }
     
     // 分发到所有目标
