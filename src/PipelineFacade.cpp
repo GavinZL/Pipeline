@@ -503,7 +503,7 @@ bool PipelineFacade::setupInputBasedOnPreset() {
                 if (mPlatformContext) {
                     metalManager = mPlatformContext->getIOSMetalManager();
                 }
-                // 🔥 优化：CameraPreview 不需要 CPU 输出，CameraRecord 可能需要用于编码
+                // CameraPreview 不需要 CPU 输出，CameraRecord 需要用于编码
                 bool enableCPUOutput = (mConfig.preset == PipelinePreset::CameraRecord);
                 EntityId inputId = mPipelineManager->setupPixelBufferInput(width, height, metalManager, enableCPUOutput);
                 if (inputId == InvalidEntityId) {

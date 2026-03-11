@@ -157,8 +157,18 @@ struct PipelineCallbacks {
  * // 6. 停止
  * pipeline->stop();
  * @endcode
+ *
+ * @deprecated 请使用新的 Pipeline 类 (include/pipeline/PipelineNew.h)
+ * @code
+ * // 新代码示例：
+ * auto pipeline = Pipeline::create()
+ *     .withPreset(PipelinePreset::CameraPreview)
+ *     .withPlatform(PlatformType::iOS)
+ *     .build();
+ * pipeline->start();
+ * @endcode
  */
-class PipelineFacade {
+class [[deprecated("Use Pipeline class instead (see include/pipeline/PipelineNew.h)")]] PipelineFacade {
 public:
     /**
      * @brief 创建Pipeline实例

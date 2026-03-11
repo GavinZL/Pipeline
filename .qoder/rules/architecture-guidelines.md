@@ -129,7 +129,54 @@ pipeline->start();
 
 ### OutputEntity
 
-**规则**:
+**数据传输设计原则**:
+- ✅ **统一使用 LRPlanarTexture**: GPU 纹理统一使用 `planarTexture` 字段，RGBA 作为单平面处理
+- ❌ **避免双字段设计**: 不要同时维护 `texture` 和 `planarTexture`，增加复杂度
+- ✅ **动态格式适配**: 根据 `OutputFormat` 动态创建对应的 `PlanarFormat`
+
+**OutputData 数据结构**:
+```cpp
+struct OutputData {
+    // CPU 数据
+    const uint8_t* cpuData = nullptr;
+    size_t cpuDataSize = 0;
+    
+    // GPU 数据（统一使用 planarTexture）
+    std::shared_ptr<LRPlanarTexture> planarTexture;
+    
+    // 元信息
+    uint32_t width, height;
+    OutputFormat format;  // RGBA/BGRA/RGB/YUV420/NV12/NV21
+};
+```
+
+**格式转换规则**:
+| OutputFormat | PlanarFormat | 平面数 | 数据布局 |
+|--------------|--------------|--------|----------|
+| RGBA/BGRA/RGB | RGBA | 1 | 单平面 RGBA |
+| YUV420 | YUV420P | 3 | Y(全尺寸) + U(1/4) + V(1/4) |
+| NV12/NV21 | NV12/NV21 | 2 | Y(全尺寸) + UV(半尺寸) |
+
+**CPU 数据渲染流程**:
+```cpp
+// 1. 创建临时 PlanarTexture（缓存复用）
+auto planarTexture = getOrCreateCpuPlanarTexture(context, width, height, format);
+
+// 2. 根据 format 上传数据到各平面
+if (format == OutputFormat::YUV420) {
+    planarTexture->UpdateAllPlanes({yData, uData, vData});
+} else if (format == OutputFormat::NV12 || format == OutputFormat::NV21) {
+    planarTexture->UpdateAllPlanes({yData, uvData});
+} else {
+    planarTexture->UpdateAllPlanes({cpuData});  // RGBA 单平面
+}
+
+// 3. 渲染第一个平面
+auto planeTexture = planarTexture->GetPlaneTexture(0);
+renderTexture(planeTexture, config);
+```
+
+**输出目标规则**:
 - 支持多输出目标（Display/Encoder/Callback等）
 - 每个输出目标独立开关
 - 平台特定输出使用条件编译
@@ -256,7 +303,7 @@ try {
 
 ---
 
-**版本**: v1.1  
+**版本**: v1.2  
 **创建日期**: 2026-01-27  
-**最后更新**: 2026-02-24  
+**最后更新**: 2026-02-25  
 **维护者**: Pipeline Team

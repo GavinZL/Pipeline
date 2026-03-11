@@ -142,10 +142,13 @@ elseif(IOS OR APPLE)
 endif()
 
 # ============================================
-# 外观接口源文件
+# 外观接口源文件 (Pipeline 2.0 New API)
 # ============================================
 set(PIPELINE_FACADE_SOURCES
     src/PipelineFacade.cpp
+    src/Pipeline.cpp
+    src/PipelineBuilder.cpp
+    src/PipelineImpl.cpp
 )
 
 # ============================================
@@ -326,7 +329,18 @@ if(PIPELINE_BUILD_TESTS)
     
     add_test(NAME PlatformContextTest COMMAND test_platform_context)
     
-    message(STATUS "Tests enabled: test_platform_context")
+    # Pipeline 2.0 API 测试
+    add_executable(test_pipeline_new
+        tests/test_pipeline_new.cpp
+    )
+    
+    target_link_libraries(test_pipeline_new
+        PRIVATE Pipeline
+    )
+    
+    add_test(NAME PipelineNewTest COMMAND test_pipeline_new)
+    
+    message(STATUS "Tests enabled: test_platform_context, test_pipeline_new")
 endif()
 
 # ============================================

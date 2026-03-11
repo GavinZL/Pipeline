@@ -67,7 +67,7 @@ struct ExecutionStats {
  * - 使用Consumable管理依赖链
  * - 支持跳帧和背压控制
  * 
- * 🔥 线程安全：继承 enable_shared_from_this 以支持异步回调安全访问
+ * 线程安全：继承 enable_shared_from_this 以支持异步回调安全访问
  */
 class PipelineExecutor : public std::enable_shared_from_this<PipelineExecutor> {
 public:
@@ -203,7 +203,7 @@ public:
     void setErrorCallback(std::function<void(EntityId, const std::string&)> callback);
     
     // ==========================================================================
-    // 异步任务链接口 (新增)
+    // 异步任务链接口
     // ==========================================================================
     
     /**
@@ -290,7 +290,7 @@ private:
     std::vector<std::vector<EntityId>> mExecutionLevels;
     
     // ==========================================================================
-    // 异步任务链状态 (新增)
+    // 异步任务链状态
     // ==========================================================================
     
     /**

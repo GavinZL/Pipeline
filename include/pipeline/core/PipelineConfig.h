@@ -35,8 +35,8 @@ struct PipelineConfig {
     std::string name = "Pipeline";
     
     // 渲染后端
-    bool preferMetal = true;              // 优先使用Metal（macOS/iOS）
-    bool preferGLES = true;               // 优先使用GLES（Android）
+    bool preferMetal = false;              // 优先使用Metal（macOS/iOS）
+    bool preferGLES = false;               // 优先使用GLES（Android）
     
     // 资源池配置
     uint32_t texturePoolSize = 16;        // 纹理池大小

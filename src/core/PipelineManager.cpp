@@ -78,7 +78,7 @@ bool PipelineManager::initialize() {
         return false;
     }
     
-    // 初始化GPU资源
+    // 初始化GPU资源 [可以使用时再初始化]
     if (!initializeGPUResources()) {
         PIPELINE_LOGE("Failed to initialize GPU resources");
         setState(PipelineState::Error);
@@ -140,7 +140,7 @@ bool PipelineManager::start() {
         return false;
     }
     
-    // 🔥 异步任务链: 启动InputEntity的processing loop
+    // 异步任务链: 启动InputEntity的processing loop
     auto inputEntity = getInputEntity();
     if (inputEntity) {
         inputEntity->setExecutor(mExecutor.get());
@@ -156,7 +156,7 @@ bool PipelineManager::start() {
         PIPELINE_LOGW("No InputEntity found, pipeline may not receive input data");
     }
     
-    // 🔥 设置所有Entity的Executor引用
+    // 设置所有Entity的Executor引用
     auto allEntities = mGraph->getAllEntities();
     for (auto& entity : allEntities) {
         if (entity->getType() == EntityType::Composite) {
@@ -527,7 +527,7 @@ EntityId PipelineManager::setupPixelBufferInput(uint32_t width, uint32_t height,
     
     // 配置
     input::InputConfig config;
-    config.enableDualOutput = enableCPUOutput;  // 🔥 修改：根据参数决定是否启用 CPU 输出
+    config.enableDualOutput = enableCPUOutput;  // 根据参数决定是否启用 CPU 输出
     config.width = width;
     config.height = height;
     mInputEntity->configure(config);

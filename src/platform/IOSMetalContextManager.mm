@@ -116,7 +116,7 @@ std::shared_ptr<lrengine::render::LRPlanarTexture> IOSMetalContextManager::creat
         // 根据 CVPixelBuffer 格式确定 ImageFormat
         if (pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange) {
             imageDesc.format = lrengine::render::ImageFormat::NV12;
-            imageDesc.colorSpace = lrengine::render::ColorSpace::BT709;
+            imageDesc.colorSpace = lrengine::render::ColorSpace::BT601;
             imageDesc.range = lrengine::render::ColorRange::Full;
         } else if (pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange) {
             imageDesc.format = lrengine::render::ImageFormat::NV12;
@@ -198,7 +198,7 @@ std::shared_ptr<lrengine::render::LRPlanarTexture> IOSMetalContextManager::creat
         imageDesc.height = static_cast<uint32_t>(height);
         imageDesc.format = lrengine::render::ImageFormat::RGBA8;
         imageDesc.colorSpace = lrengine::render::ColorSpace::BT709;
-        imageDesc.range = lrengine::render::ColorRange::Full;
+        imageDesc.range = lrengine::render::ColorRange::Video;
         
         // 使用 ImageBuffer 包装 CVPixelBuffer
         auto buffer = std::make_unique<lrengine::utils::CVPixelBufferWrapper>(pixelBuffer);
