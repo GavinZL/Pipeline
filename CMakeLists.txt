@@ -12,6 +12,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ============================================
+# 第三方库 - JSON
+# ============================================
+include(FetchContent)
+FetchContent_Declare(
+    json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.2
+)
+FetchContent_MakeAvailable(json)
+message(STATUS "nlohmann/json library ready")
+
+# ============================================
 # 调试配置
 # ============================================
 # 确保生成调试符号
@@ -86,6 +98,8 @@ set(PIPELINE_CORE_SOURCES
     src/core/PipelineExecutor.cpp
     src/core/PipelineManager.cpp
     src/core/PipelineConfig.cpp
+    src/core/PipelineError.cpp
+    src/core/PipelineConfigJson.cpp
     
     # 资源池
     src/pool/FramePacketPool.cpp
@@ -100,6 +114,7 @@ set(PIPELINE_CORE_SOURCES
 # ============================================
 set(PIPELINE_PLATFORM_SOURCES
     src/platform/PlatformContext.cpp
+    src/platform/PlatformStrategy.cpp
 )
 
 if(ANDROID)
@@ -224,6 +239,14 @@ else()
     message(WARNING "libyuv target not found")
 endif()
 
+# 链接 nlohmann/json
+if(TARGET nlohmann_json::nlohmann_json)
+    target_link_libraries(Pipeline PUBLIC nlohmann_json::nlohmann_json)
+    message(STATUS "Pipeline linked with nlohmann/json")
+else()
+    message(WARNING "nlohmann_json target not found")
+endif()
+
 # ============================================
 # 编译选项
 # ============================================
@@ -271,7 +294,7 @@ elseif(APPLE)
         "-framework CoreVideo"
         "-framework QuartzCore"
     )
-    
+
 elseif(WIN32)
     target_compile_definitions(Pipeline PRIVATE PIPELINE_PLATFORM_WINDOWS)
     
@@ -339,8 +362,41 @@ if(PIPELINE_BUILD_TESTS)
     )
     
     add_test(NAME PipelineNewTest COMMAND test_pipeline_new)
-    
-    message(STATUS "Tests enabled: test_platform_context, test_pipeline_new")
+
+    # Platform Strategy 测试
+    add_executable(test_platform_strategy
+        tests/test_platform_strategy.cpp
+    )
+
+    target_link_libraries(test_platform_strategy
+        PRIVATE Pipeline
+    )
+
+    add_test(NAME PlatformStrategyTest COMMAND test_platform_strategy)
+
+    # Pipeline Error 测试
+    add_executable(test_pipeline_error
+        tests/test_pipeline_error.cpp
+    )
+
+    target_link_libraries(test_pipeline_error
+        PRIVATE Pipeline
+    )
+
+    add_test(NAME PipelineErrorTest COMMAND test_pipeline_error)
+
+    # Pipeline JSON Config 测试
+    add_executable(test_pipeline_json
+        tests/test_pipeline_json.cpp
+    )
+
+    target_link_libraries(test_pipeline_json
+        PRIVATE Pipeline
+    )
+
+    add_test(NAME PipelineJsonTest COMMAND test_pipeline_json)
+
+    message(STATUS "Tests enabled: test_platform_context, test_pipeline_new, test_platform_strategy, test_pipeline_error, test_pipeline_json")
 endif()
 
 # ============================================

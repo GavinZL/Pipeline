@@ -1,6 +1,7 @@
 #include "PipelineImpl.h"
 #include "pipeline/PipelineNew.h"
 #include "pipeline/core/PipelineManager.h"
+#include "pipeline/core/PipelineError.h"
 #include "pipeline/platform/PlatformContext.h"
 #include "pipeline/utils/PipelineLog.h"
 #include <string>
@@ -93,12 +94,22 @@ void PipelineImpl::stop() {
 
 void PipelineImpl::destroy() {
     stop();
-    
+
+    if (mInputStrategy) {
+        mInputStrategy->destroy();
+        mInputStrategy.reset();
+    }
+
+    if (mOutputStrategy) {
+        mOutputStrategy->destroy();
+        mOutputStrategy.reset();
+    }
+
     if (mManager) {
         mManager->destroy();
         mManager.reset();
     }
-    
+
     mPlatformContext.reset();
     mInitialized = false;
     setRuntimeState(PipelineState::Created);
@@ -118,34 +129,50 @@ bool PipelineImpl::isRunning() const {
 // 输入接口
 // ============================================================================
 
-bool PipelineImpl::feedRGBA(const uint8_t* data, uint32_t width, uint32_t height, 
-                            uint32_t stride, uint64_t timestamp) {
-    (void)data; (void)width; (void)height; (void)stride; (void)timestamp;
-    // TODO: 实现 RGBA 输入
-    return false;
+Result<void> PipelineImpl::feedRGBA(const uint8_t* data, uint32_t width, uint32_t height,
+                                    uint32_t stride, uint64_t timestamp) {
+    if (!mInputStrategy) {
+        return Result<void>::error(PipelineError::internalError("Input strategy not initialized"));
+    }
+    if (!mInputStrategy->feedRGBA(data, width, height, stride, timestamp)) {
+        return Result<void>::error(PipelineError::runtimeError("Failed to feed RGBA data"));
+    }
+    return Result<void>::success();
 }
 
-bool PipelineImpl::feedYUV420(const uint8_t* yData, const uint8_t* uData, 
-                              const uint8_t* vData, uint32_t width, uint32_t height,
-                              uint64_t timestamp) {
-    (void)yData; (void)uData; (void)vData; (void)width; (void)height; (void)timestamp;
-    // TODO: 实现 YUV420 输入
-    return false;
+Result<void> PipelineImpl::feedYUV420(const uint8_t* yData, const uint8_t* uData,
+                                      const uint8_t* vData, uint32_t width, uint32_t height,
+                                      uint64_t timestamp) {
+    if (!mInputStrategy) {
+        return Result<void>::error(PipelineError::internalError("Input strategy not initialized"));
+    }
+    if (!mInputStrategy->feedYUV420(yData, uData, vData, width, height, timestamp)) {
+        return Result<void>::error(PipelineError::runtimeError("Failed to feed YUV420 data"));
+    }
+    return Result<void>::success();
 }
 
-bool PipelineImpl::feedNV12(const uint8_t* yData, const uint8_t* uvData,
-                            uint32_t width, uint32_t height, bool isNV21,
-                            uint64_t timestamp) {
-    (void)yData; (void)uvData; (void)width; (void)height; (void)isNV21; (void)timestamp;
-    // TODO: 实现 NV12 输入
-    return false;
+Result<void> PipelineImpl::feedNV12(const uint8_t* yData, const uint8_t* uvData,
+                                    uint32_t width, uint32_t height, bool isNV21,
+                                    uint64_t timestamp) {
+    if (!mInputStrategy) {
+        return Result<void>::error(PipelineError::internalError("Input strategy not initialized"));
+    }
+    if (!mInputStrategy->feedNV12(yData, uvData, width, height, isNV21, timestamp)) {
+        return Result<void>::error(PipelineError::runtimeError("Failed to feed NV12 data"));
+    }
+    return Result<void>::success();
 }
 
-bool PipelineImpl::feedTexture(std::shared_ptr<::lrengine::render::LRTexture> texture, 
-                               uint32_t width, uint32_t height, uint64_t timestamp) {
-    (void)texture; (void)width; (void)height; (void)timestamp;
-    // TODO: 实现纹理输入
-    return false;
+Result<void> PipelineImpl::feedTexture(std::shared_ptr<::lrengine::render::LRTexture> texture,
+                                       uint32_t width, uint32_t height, uint64_t timestamp) {
+    if (!mInputStrategy) {
+        return Result<void>::error(PipelineError::internalError("Input strategy not initialized"));
+    }
+    if (!mInputStrategy->feedTexture(std::move(texture), width, height, timestamp)) {
+        return Result<void>::error(PipelineError::runtimeError("Failed to feed texture"));
+    }
+    return Result<void>::success();
 }
 
 // ============================================================================
@@ -198,28 +225,32 @@ EntityId PipelineImpl::addSharpenFilter(float amount) {
 // ============================================================================
 
 int32_t PipelineImpl::addDisplayOutput(void* surface, uint32_t width, uint32_t height) {
-    (void)surface; (void)width; (void)height;
-    // TODO: 实现显示输出
+    if (mOutputStrategy) {
+        return mOutputStrategy->createDisplayOutput(surface, width, height);
+    }
     return -1;
 }
 
 int32_t PipelineImpl::addCallbackOutput(
     std::function<void(const uint8_t*, size_t, uint32_t, uint32_t, int64_t)> callback,
     output::OutputFormat format) {
-    (void)callback; (void)format;
-    // TODO: 实现回调输出
+    if (mOutputStrategy) {
+        return mOutputStrategy->createCallbackOutput(std::move(callback), format);
+    }
     return -1;
 }
 
 bool PipelineImpl::removeOutputTarget(int32_t targetId) {
-    (void)targetId;
-    // TODO: 实现移除输出目标
+    if (mOutputStrategy) {
+        return mOutputStrategy->removeOutput(targetId);
+    }
     return false;
 }
 
 void PipelineImpl::setOutputTargetEnabled(int32_t targetId, bool enabled) {
-    (void)targetId; (void)enabled;
-    // TODO: 实现启用/禁用输出目标
+    if (mOutputStrategy) {
+        mOutputStrategy->setOutputEnabled(targetId, enabled);
+    }
 }
 
 // ============================================================================
@@ -307,27 +338,45 @@ bool PipelineImpl::initializeInternal() {
         PIPELINE_LOGE("PipelineImpl::initializeInternal() - PlatformContext init failed");
         return false;
     }
-    
-    // TODO: 创建 LRRenderContext
-    // mRenderContext = ...;
-    
+
+    // 创建策略对象
+    mInputStrategy = strategy::PlatformStrategyFactory::createInputStrategy(
+        mBuilderState.platformConfig.platform, mBuilderState.inputFormat);
+    mOutputStrategy = strategy::PlatformStrategyFactory::createOutputStrategy(
+        mBuilderState.platformConfig.platform);
+
+    if (!mInputStrategy || !mOutputStrategy) {
+        PIPELINE_LOGE("PipelineImpl::initializeInternal() - Strategy creation failed");
+        return false;
+    }
+
+    if (!mInputStrategy->initialize(this, mBuilderState.inputWidth, mBuilderState.inputHeight)) {
+        PIPELINE_LOGE("PipelineImpl::initializeInternal() - InputStrategy init failed");
+        return false;
+    }
+
+    if (!mOutputStrategy->initialize(this)) {
+        PIPELINE_LOGE("PipelineImpl::initializeInternal() - OutputStrategy init failed");
+        return false;
+    }
+
     // 创建 PipelineManager
     PipelineConfig config;
     config.name = "Pipeline";
     config.maxConcurrentFrames = static_cast<uint32_t>(mBuilderState.maxQueueSize);
     config.enableParallelExecution = mBuilderState.enableMultiThread;
-    
+
     mManager = PipelineManager::create(mRenderContext, config);
     if (!mManager) {
         PIPELINE_LOGE("PipelineImpl::initializeInternal() - PipelineManager create failed");
         return false;
     }
-    
+
     if (!mManager->initialize()) {
         PIPELINE_LOGE("PipelineImpl::initializeInternal() - PipelineManager init failed");
         return false;
     }
-    
+
     return true;
 }
 

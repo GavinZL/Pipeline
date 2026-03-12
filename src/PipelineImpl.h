@@ -13,6 +13,7 @@
 #include "pipeline/PipelineNew.h"
 #include "pipeline/core/PipelineManager.h"
 #include "pipeline/platform/PlatformContext.h"
+#include "pipeline/platform/PlatformStrategy.h"
 #include "pipeline/input/InputEntity.h"
 #include "pipeline/output/OutputEntity.h"
 #include "pipeline/data/FramePacket.h"
@@ -181,19 +182,19 @@ public:
     // 输入接口
     // ========================================================================
     
-    bool feedRGBA(const uint8_t* data, uint32_t width, uint32_t height, 
-                  uint32_t stride, uint64_t timestamp);
+    Result<void> feedRGBA(const uint8_t* data, uint32_t width, uint32_t height, 
+                          uint32_t stride, uint64_t timestamp);
     
-    bool feedYUV420(const uint8_t* yData, const uint8_t* uData, 
-                    const uint8_t* vData, uint32_t width, uint32_t height,
-                    uint64_t timestamp);
+    Result<void> feedYUV420(const uint8_t* yData, const uint8_t* uData, 
+                            const uint8_t* vData, uint32_t width, uint32_t height,
+                            uint64_t timestamp);
     
-    bool feedNV12(const uint8_t* yData, const uint8_t* uvData,
-                  uint32_t width, uint32_t height, bool isNV21,
-                  uint64_t timestamp);
+    Result<void> feedNV12(const uint8_t* yData, const uint8_t* uvData,
+                          uint32_t width, uint32_t height, bool isNV21,
+                          uint64_t timestamp);
     
-    bool feedTexture(std::shared_ptr<::lrengine::render::LRTexture> texture, 
-                     uint32_t width, uint32_t height, uint64_t timestamp);
+    Result<void> feedTexture(std::shared_ptr<::lrengine::render::LRTexture> texture, 
+                             uint32_t width, uint32_t height, uint64_t timestamp);
     
     // ========================================================================
     // Entity 管理
@@ -317,11 +318,15 @@ private:
     std::map<int32_t, std::shared_ptr<output::OutputTarget>> mOutputTargets;
     std::atomic<int32_t> mNextTargetId{0};
     
+    // 策略对象
+    std::unique_ptr<strategy::InputStrategy> mInputStrategy;
+    std::unique_ptr<strategy::OutputStrategy> mOutputStrategy;
+
     // 回调
     std::function<void(FramePacketPtr)> mFrameCallback;
     std::function<void(const std::string&)> mErrorCallback;
     std::function<void(PipelineState)> mStateCallback;
-    
+
     // 初始化标志
     bool mInitialized = false;
     std::mutex mInitMutex;

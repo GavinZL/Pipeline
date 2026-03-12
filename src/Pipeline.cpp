@@ -1,4 +1,5 @@
 #include "pipeline/PipelineNew.h"
+#include "pipeline/core/PipelineError.h"
 #include "PipelineImpl.h"
 #include <stdexcept>
 
@@ -32,8 +33,14 @@ Pipeline::~Pipeline() = default;
 // 生命周期
 // ============================================================================
 
-bool Pipeline::start() {
-    return mImpl ? mImpl->start() : false;
+Result<void> Pipeline::start() {
+    if (!mImpl) {
+        return Result<void>::error(PipelineError::internalError("Pipeline implementation is null"));
+    }
+    if (!mImpl->start()) {
+        return Result<void>::error(PipelineError::initializationFailed("Pipeline start failed"));
+    }
+    return Result<void>::success();
 }
 
 void Pipeline::pause() {
@@ -64,26 +71,50 @@ bool Pipeline::isRunning() const {
 // 输入接口
 // ============================================================================
 
-bool Pipeline::feedRGBA(const uint8_t* data, uint32_t width, uint32_t height, 
-                        uint32_t stride, uint64_t timestamp) {
-    return mImpl ? mImpl->feedRGBA(data, width, height, stride, timestamp) : false;
+Result<void> Pipeline::feedRGBA(const uint8_t* data, uint32_t width, uint32_t height,
+                                  uint32_t stride, uint64_t timestamp) {
+    if (!mImpl) {
+        return Result<void>::error(PipelineError::internalError("Pipeline implementation is null"));
+    }
+    if (!mImpl->feedRGBA(data, width, height, stride, timestamp)) {
+        return Result<void>::error(PipelineError::runtimeError("Failed to feed RGBA data"));
+    }
+    return Result<void>::success();
 }
 
-bool Pipeline::feedYUV420(const uint8_t* yData, const uint8_t* uData, 
-                          const uint8_t* vData, uint32_t width, uint32_t height,
-                          uint64_t timestamp) {
-    return mImpl ? mImpl->feedYUV420(yData, uData, vData, width, height, timestamp) : false;
+Result<void> Pipeline::feedYUV420(const uint8_t* yData, const uint8_t* uData,
+                                    const uint8_t* vData, uint32_t width, uint32_t height,
+                                    uint64_t timestamp) {
+    if (!mImpl) {
+        return Result<void>::error(PipelineError::internalError("Pipeline implementation is null"));
+    }
+    if (!mImpl->feedYUV420(yData, uData, vData, width, height, timestamp)) {
+        return Result<void>::error(PipelineError::runtimeError("Failed to feed YUV420 data"));
+    }
+    return Result<void>::success();
 }
 
-bool Pipeline::feedNV12(const uint8_t* yData, const uint8_t* uvData,
-                        uint32_t width, uint32_t height, bool isNV21,
-                        uint64_t timestamp) {
-    return mImpl ? mImpl->feedNV12(yData, uvData, width, height, isNV21, timestamp) : false;
+Result<void> Pipeline::feedNV12(const uint8_t* yData, const uint8_t* uvData,
+                                  uint32_t width, uint32_t height, bool isNV21,
+                                  uint64_t timestamp) {
+    if (!mImpl) {
+        return Result<void>::error(PipelineError::internalError("Pipeline implementation is null"));
+    }
+    if (!mImpl->feedNV12(yData, uvData, width, height, isNV21, timestamp)) {
+        return Result<void>::error(PipelineError::runtimeError("Failed to feed NV12 data"));
+    }
+    return Result<void>::success();
 }
 
-bool Pipeline::feedTexture(std::shared_ptr<::lrengine::render::LRTexture> texture, 
-                           uint32_t width, uint32_t height, uint64_t timestamp) {
-    return mImpl ? mImpl->feedTexture(std::move(texture), width, height, timestamp) : false;
+Result<void> Pipeline::feedTexture(std::shared_ptr<::lrengine::render::LRTexture> texture,
+                                     uint32_t width, uint32_t height, uint64_t timestamp) {
+    if (!mImpl) {
+        return Result<void>::error(PipelineError::internalError("Pipeline implementation is null"));
+    }
+    if (!mImpl->feedTexture(std::move(texture), width, height, timestamp)) {
+        return Result<void>::error(PipelineError::runtimeError("Failed to feed texture"));
+    }
+    return Result<void>::success();
 }
 
 // ============================================================================

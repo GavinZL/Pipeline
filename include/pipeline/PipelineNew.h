@@ -7,6 +7,7 @@
 
 #include "pipeline/PipelineFacade.h"
 #include "pipeline/core/PipelineManager.h"
+#include "pipeline/core/PipelineError.h"
 #include "pipeline/data/EntityTypes.h"
 #include "pipeline/data/FramePacket.h"
 #include "pipeline/platform/PlatformContext.h"
@@ -51,18 +52,18 @@ public:
     Pipeline(const Pipeline&) = delete;
     Pipeline& operator=(const Pipeline&) = delete;
     
-    [[nodiscard]] bool start();
+    [[nodiscard]] Result<void> start();
     void pause();
     void resume();
     void stop();
     void destroy();
     PipelineState getState() const;
     bool isRunning() const;
-    
-    bool feedRGBA(const uint8_t* data, uint32_t width, uint32_t height, uint32_t stride = 0, uint64_t timestamp = 0);
-    bool feedYUV420(const uint8_t* yData, const uint8_t* uData, const uint8_t* vData, uint32_t width, uint32_t height, uint64_t timestamp = 0);
-    bool feedNV12(const uint8_t* yData, const uint8_t* uvData, uint32_t width, uint32_t height, bool isNV21 = false, uint64_t timestamp = 0);
-    bool feedTexture(std::shared_ptr<::lrengine::render::LRTexture> texture, uint32_t width, uint32_t height, uint64_t timestamp = 0);
+
+    Result<void> feedRGBA(const uint8_t* data, uint32_t width, uint32_t height, uint32_t stride = 0, uint64_t timestamp = 0);
+    Result<void> feedYUV420(const uint8_t* yData, const uint8_t* uData, const uint8_t* vData, uint32_t width, uint32_t height, uint64_t timestamp = 0);
+    Result<void> feedNV12(const uint8_t* yData, const uint8_t* uvData, uint32_t width, uint32_t height, bool isNV21 = false, uint64_t timestamp = 0);
+    Result<void> feedTexture(std::shared_ptr<::lrengine::render::LRTexture> texture, uint32_t width, uint32_t height, uint64_t timestamp = 0);
     
     EntityId addEntity(ProcessEntityPtr entity);
     bool removeEntity(EntityId entityId);
